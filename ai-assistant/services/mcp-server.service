@@ -1,0 +1,20 @@
+[Unit]
+Description=OpenSearch MCP Server
+After=network.target
+
+
+[Service]
+User=mcpserver
+Group=mcpserver
+WorkingDirectory=/opt/mcp_server-env
+EnvironmentFile=/etc/mcp-server/mcp-server.env
+ExecStart=/opt/mcp_server-env/bin/python -m mcp_server_opensearch --transport stream --host 0.0.0.0 --port 9900
+Restart=always
+RestartSec=10
+TimeoutStopSec=15
+StandardOutput=append:/var/log/mcp_server/mcp-server.log
+StandardError=append:/var/log/mcp_server/mcp-server.log
+
+
+[Install]
+WantedBy=multi-user.target

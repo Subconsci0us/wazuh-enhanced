@@ -1,0 +1,32 @@
+<group name="peca,">
+
+  <!-- PECA Section 3 & 6: Unauthorized Access -->
+  <!-- Extending authentication failure rules -->
+  <rule id="100001" level="10">
+    <if_sid>5710, 5716, 5503, 5504</if_sid> <!-- SSHD/PAM failed logins -->
+    <description>PECA Sec 3: Potential Unauthorized Access Attempt.</description>
+    <group>authentication_failed,peca_3,</group>
+  </rule>
+
+  <!-- PECA Section 4, 5, 8, 11: FIM Changes -->
+  <rule id="100002" level="7">
+    <if_sid>550</if_sid> <!-- Syscheck integrity checksum changed -->
+    <description>PECA Sec 4/11: Data Modification Detected (Potential Electronic Forgery).</description>
+    <group>syscheck,peca_4,peca_11,</group>
+  </rule>
+
+  <rule id="100003" level="12">
+    <if_sid>550</if_sid>
+    <match>/opt/critical_app/data</match>
+    <description>PECA Sec 6/8: Critical Infrastructure Data Modification.</description>
+    <group>syscheck,peca_6,peca_8,critical_infrastructure,</group>
+  </rule>
+
+  <!-- PECA Section 20: Malicious Code -->
+  <rule id="100004" level="12">
+    <if_group>rootcheck</if_group>
+    <description>PECA Sec 20: Malicious Code/Rootkit Detected.</description>
+    <group>rootcheck,peca_20,</group>
+  </rule>
+
+</group>

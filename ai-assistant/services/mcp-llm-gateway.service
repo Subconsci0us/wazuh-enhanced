@@ -1,0 +1,22 @@
+[Unit]
+Description=MCP LLM Gateway
+After=network.target
+
+
+[Service]
+User=mcpgateway
+Group=mcpgateway
+WorkingDirectory=/opt/mcp_llm_gateway-env
+EnvironmentFile=/etc/mcp-llm-gateway/mcp-llm-gateway.env
+ExecStart=/opt/mcp_llm_gateway-env/bin/python /opt/mcp_llm_gateway-env/mcp_llm_gateway.py
+ReadOnlyPaths=
+ReadWritePaths=/etc/mcp-llm-gateway /var/log/mcp_llm_gateway
+Restart=always
+RestartSec=10
+TimeoutStopSec=15
+StandardOutput=append:/var/log/mcp_llm_gateway/mcp-llm-gateway.log
+StandardError=append:/var/log/mcp_llm_gateway/mcp-llm-gateway.log
+
+
+[Install]
+WantedBy=multi-user.target
