@@ -75,6 +75,59 @@ fi
 sudo cp "$RULES_SRC"/*.xml "$RULES_DEST/"
 success "Rules copied to $RULES_DEST."
 
+# ── Check for rule ID conflicts ───────────────────────────────────────────────
+info "Checking for rule ID conflicts …"
+
+PECA_FILE="$RULES_DEST/peca_rules.xml"
+
+# Collect IDs from every rule file except peca_rules.xml
+OTHER_IDS=""
+for _f in "$RULES_DEST"/*.xml; do
+    [ "$(basename "$_f")" = "peca_rules.xml" ] && continue
+    OTHER_IDS="$OTHER_IDS
+$(sudo grep -oP '(?<=id=")[0-9]+' "$_f" 2>/dev/null)"
+done
+OTHER_IDS=$(echo "$OTHER_IDS" | sort -u | grep -v '^$')
+
+# Collect PECA rule IDs (order preserved for stable renumbering)
+PECA_IDS=$(sudo grep -oP '(?<=id=")[0-9]+' "$PECA_FILE" 2>/dev/null)
+
+CONFLICTS=""
+for _id in $PECA_IDS; do
+    if echo "$OTHER_IDS" | grep -qx "$_id"; then
+        CONFLICTS="$CONFLICTS $_id"
+    fi
+done
+CONFLICTS="${CONFLICTS# }"
+
+if [ -n "$CONFLICTS" ]; then
+    warn "Rule ID conflicts detected: $CONFLICTS"
+    warn "Renumbering conflicting PECA rules starting from 100100 …"
+
+    PECA_TMP=$(mktemp)
+    sudo cp "$PECA_FILE" "$PECA_TMP"
+    sudo chmod 644 "$PECA_TMP"
+
+    NEXT_ID=100100
+    ASSIGNED=""
+    for _old in $CONFLICTS; do
+        # Advance past any ID already in use by other files or already assigned this pass
+        while echo "$OTHER_IDS $ASSIGNED" | grep -qw "$NEXT_ID"; do
+            NEXT_ID=$((NEXT_ID + 1))
+        done
+        sed -i "s/id=\"${_old}\"/id=\"${NEXT_ID}\"/g" "$PECA_TMP"
+        info "  Rule ID ${_old} → ${NEXT_ID}"
+        ASSIGNED="$ASSIGNED $NEXT_ID"
+        NEXT_ID=$((NEXT_ID + 1))
+    done
+
+    sudo cp "$PECA_TMP" "$PECA_FILE"
+    rm -f "$PECA_TMP"
+    success "PECA rules renumbered."
+else
+    info "No rule ID conflicts found."
+fi
+
 info "Restarting wazuh-manager …"
 sudo systemctl restart wazuh-manager
 success "wazuh-manager restarted."

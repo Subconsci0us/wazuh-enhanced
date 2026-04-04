@@ -224,10 +224,10 @@ Expected response when everything is working:
 
 | Rule ID | Level | PECA Section | Description |
 |---------|-------|--------------|-------------|
-| 100001 | 10 | Sec 3 (Unauthorized Access) | Authentication failure (SSH/PAM) — potential unauthorized access |
-| 100002 | 7 | Sec 4/11 (Electronic Forgery / Data) | FIM integrity checksum changed — data modification detected |
-| 100003 | 12 | Sec 6/8 (Critical Infrastructure) | FIM change in `/opt/critical_app/data` — critical infrastructure data modified |
-| 100004 | 12 | Sec 20 (Malicious Code) | Rootcheck/rootkit detected — malicious code |
+| 100100 | 10 | Sec 3 (Unauthorized Access) | Authentication failure (SSH/PAM) — potential unauthorized access |
+| 100101 | 7 | Sec 4/11 (Electronic Forgery / Data) | FIM integrity checksum changed — data modification detected |
+| 100102 | 12 | Sec 6/8 (Critical Infrastructure) | FIM change in `/opt/critical_app/data` — critical infrastructure data modified |
+| 100103 | 12 | Sec 20 (Malicious Code) | Rootcheck/rootkit detected — malicious code |
 
 Rules are stored in `rules/peca_rules.xml` and deployed to `/var/ossec/etc/rules/` by `setup.sh`.
 
