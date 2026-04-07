@@ -1,0 +1,5 @@
+# npm dependencies — installed locally by install.sh in /tmp, never committed
+node_modules/
+
+# npm lock file — generated during build, not needed in the repo
+package-lock.json

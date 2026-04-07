@@ -6,12 +6,9 @@ An OpenSearch Dashboards (OSD) plugin that renders a live, interactive D3.js for
 
 ## What It Looks Like
 
-```
-        [Wazuh Manager]
-       /       |        \
-  [Agent A]  [Agent B]  [Agent C]
-  green       red        gray
-```
+![Network Graph showing 3 agents connected to the Wazuh manager, with a hover tooltip displaying agent details](graphTest.jpg)
+
+*Screenshot: 3 test agents connected to the Wazuh Manager. The hover tooltip shows agent ID, IP, OS, and connection status. All edges are gray (no alerts active during this test).*
 
 - **Manager node** — large blue circle labelled `MGR` at the centre
 - **Agent nodes** — smaller circles labelled with OS type (`WIN`, `DEB`, `RPM`, `LNX`)
@@ -64,21 +61,24 @@ The browser never talks directly to the Wazuh API. The OSD server plugin holds t
 
 ```
 networkGraph/
-├── opensearch_dashboards.json   ← OSD plugin manifest
-├── package.json                 ← npm metadata and build script
-├── webpack.config.js            ← webpack 5 build config
-├── install.sh                   ← build + deploy script (run as root)
+├── opensearch_dashboards.json      ← OSD plugin manifest (id, version, server/ui flags)
+├── package.json                    ← npm metadata and build script
+├── webpack.config.js               ← webpack 5 build config (entry, output, fallbacks)
+├── install.sh                      ← build + deploy script (run as root)
+├── .gitignore                      ← excludes node_modules and package-lock.json
+├── graphTest.jpg                   ← screenshot of the plugin running in the browser
+├── networkGraph-plugin-log.md      ← full development log (research, bugs, decisions)
 ├── public/
-│   ├── bundle_entry.js          ← webpack entry — registers with window.__osdBundles__
-│   └── index.js                 ← all UI code (D3 graph, polling, layout)
+│   ├── bundle_entry.js             ← webpack entry — registers with window.__osdBundles__
+│   └── index.js                    ← all UI code (D3 graph, polling, layout, OSD class)
 ├── server/
-│   ├── index.js                 ← OSD server entry (exports plugin factory)
-│   ├── plugin.js                ← NetworkGraphPlugin class (setup/start/stop)
+│   ├── index.js                    ← OSD server entry (exports plugin factory)
+│   ├── plugin.js                   ← NetworkGraphPlugin lifecycle class (setup/start/stop)
 │   └── routes/
-│       └── index.js             ← Wazuh API proxy routes + JWT token cache
+│       └── index.js                ← Wazuh API proxy routes + JWT token cache
 └── target/
     └── public/
-        └── networkGraph.plugin.js  ← pre-built webpack 5 bundle (~291 KB)
+        └── networkGraph.plugin.js  ← pre-built webpack 5 bundle (~291 KB, D3 inlined)
 ```
 
 ---
@@ -194,3 +194,9 @@ The server-side proxy obtains a JWT from the Wazuh API on first use and caches i
 | D3.js | 7.9.0 |
 | webpack | 5.98.0 |
 | Node.js (build) | 18+ |
+
+---
+
+## Development Log
+
+See [`networkGraph-plugin-log.md`](networkGraph-plugin-log.md) for the full build history — research notes, OSD internals studied, bugs encountered and fixed, and a step-by-step trace of every decision made during development.

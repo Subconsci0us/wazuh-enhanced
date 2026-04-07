@@ -66,6 +66,17 @@ wazuh-fyp-repo/
 │   └── services/
 │       ├── mcp-server.service        ← systemd unit for MCP Server
 │       └── mcp-llm-gateway.service   ← systemd unit for MCP-LLM Gateway
+├── networkGraph/
+│   ├── README.md                     ← plugin documentation
+│   ├── install.sh                    ← build + deploy script (run as root)
+│   ├── opensearch_dashboards.json    ← OSD plugin manifest
+│   ├── package.json                  ← npm metadata
+│   ├── webpack.config.js             ← webpack 5 build config
+│   ├── graphTest.jpg                 ← screenshot of the plugin in the browser
+│   ├── networkGraph-plugin-log.md    ← full development log
+│   ├── public/                       ← browser-side plugin code (D3 graph)
+│   ├── server/                       ← OSD server-side plugin (Wazuh API proxy)
+│   └── target/public/               ← pre-built webpack bundle (ready to install)
 ├── setup-log.md                      ← step-by-step log of the original installation
 └── README.md                         ← this file
 ```
