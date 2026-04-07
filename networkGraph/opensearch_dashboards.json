@@ -1,0 +1,11 @@
+{
+  "id": "networkGraph",
+  "version": "1.0.0",
+  "opensearchDashboardsVersion": "2.19.4",
+  "requiredPlugins": [
+    "navigation"
+  ],
+  "optionalPlugins": [],
+  "server": true,
+  "ui": true
+}
