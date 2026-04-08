@@ -65,7 +65,7 @@ success "Wazuh Indexer is healthy."
 # =============================================================================
 info "=== STEP B: Deploying PECA compliance rules ==="
 
-RULES_SRC="$REPO_DIR/rules"
+RULES_SRC="$REPO_DIR/peca-compliance"
 RULES_DEST="/var/ossec/etc/rules"
 
 if [ ! -d "$RULES_SRC" ] || [ -z "$(ls -A "$RULES_SRC"/*.xml 2>/dev/null)" ]; then
@@ -550,3 +550,233 @@ echo "  Click the chat icon in the top-right of the Dashboard"
 echo "  to open the AI Assistant."
 echo "────────────────────────────────────────────────────────────"
 success "Setup complete!"
+
+# =============================================================================
+# STEP I — Install PECA Compliance Dashboard Module
+# =============================================================================
+# NOTE: Run this step manually after the main setup if you want the PECA
+# module to appear in the Wazuh Dashboard alongside PCI DSS, HIPAA, etc.
+#
+# What this does:
+#   1. Copies the PECA server-side JS files into the Wazuh plugin
+#   2. Patches the compiled frontend bundles (wazuh.plugin.js, wazuh.chunk.2.js)
+#      to register PECA as a module in the UI
+#   3. Regenerates the .gz and .br compressed bundle files
+#   4. Fixes file ownership and restarts the dashboard
+#
+# The compiled bundle patches are string replacements applied with Python.
+# They are idempotent — running this step twice will not double-apply the patch.
+#
+# Usage: bash setup.sh --peca
+# Or call the function directly: install_peca_module
+# =============================================================================
+
+install_peca_module() {
+    info "=== STEP I: Installing PECA Compliance Dashboard Module ==="
+
+    WAZUH_PLUGIN="/usr/share/wazuh-dashboard/plugins/wazuh"
+    PECA_SRC="$REPO_DIR/peca-compliance/plugins/wazuh"
+
+    if [ ! -d "$WAZUH_PLUGIN" ]; then
+        error "Wazuh plugin not found at $WAZUH_PLUGIN — is Wazuh installed?"
+    fi
+    if [ ! -d "$PECA_SRC" ]; then
+        error "PECA source files not found at $PECA_SRC — is the repo complete?"
+    fi
+
+    # ── 1. Copy server-side files ─────────────────────────────────────────────
+    info "Copying PECA server-side files …"
+
+    sudo cp "$PECA_SRC/common/compliance-requirements/peca-requirements.js" \
+        "$WAZUH_PLUGIN/common/compliance-requirements/peca-requirements.js"
+
+    sudo cp "$PECA_SRC/server/lib/reporting/peca-request.js" \
+        "$WAZUH_PLUGIN/server/lib/reporting/peca-request.js"
+
+    sudo cp "$PECA_SRC/server/integration-files/peca-requirements-pdfmake.js" \
+        "$WAZUH_PLUGIN/server/integration-files/peca-requirements-pdfmake.js"
+
+    sudo cp "$PECA_SRC/common/wazuh-modules.js" \
+        "$WAZUH_PLUGIN/common/wazuh-modules.js"
+
+    sudo cp "$PECA_SRC/common/constants.js" \
+        "$WAZUH_PLUGIN/common/constants.js"
+
+    sudo cp "$PECA_SRC/server/lib/reporting/extended-information.js" \
+        "$WAZUH_PLUGIN/server/lib/reporting/extended-information.js"
+
+    sudo chown -R wazuh-dashboard:wazuh-dashboard \
+        "$WAZUH_PLUGIN/common/compliance-requirements/peca-requirements.js" \
+        "$WAZUH_PLUGIN/common/wazuh-modules.js" \
+        "$WAZUH_PLUGIN/common/constants.js" \
+        "$WAZUH_PLUGIN/server/lib/reporting/peca-request.js" \
+        "$WAZUH_PLUGIN/server/lib/reporting/extended-information.js" \
+        "$WAZUH_PLUGIN/server/integration-files/peca-requirements-pdfmake.js"
+
+    success "Server-side files copied."
+
+    # ── 2. Patch compiled frontend bundles ────────────────────────────────────
+    info "Patching compiled frontend bundles …"
+
+    CHUNK2="$WAZUH_PLUGIN/target/public/wazuh.chunk.2.js"
+    PLUGIN_JS="$WAZUH_PLUGIN/target/public/wazuh.plugin.js"
+
+    # Back up originals if no backup already exists
+    [ -f "${CHUNK2}.orig" ] || sudo cp "$CHUNK2" "${CHUNK2}.orig"
+    [ -f "${PLUGIN_JS}.orig" ] || sudo cp "$PLUGIN_JS" "${PLUGIN_JS}.orig"
+
+    sudo python3 << PYEOF
+import sys
+
+def patch_file(path, replacements):
+    with open(path, 'r', encoding='utf-8') as f:
+        content = f.read()
+    changed = 0
+    for old, new in replacements:
+        if old in content:
+            content = content.replace(old, new, 1)
+            changed += 1
+        elif new in content:
+            pass  # already patched — idempotent
+        else:
+            print(f"  WARNING: expected string not found in {path}:", file=sys.stderr)
+            print(f"    {old[:80]}", file=sys.stderr)
+    with open(path, 'w', encoding='utf-8') as f:
+        f.write(content)
+    return changed
+
+# ── wazuh.chunk.2.js patches ──────────────────────────────────────────────────
+chunk2_patches = [
+    # 1. Add peca to WAZUH_MODULES object
+    (
+        'tsc:{title:"TSC",appId:"tsc",description:"Trust Services Criteria for Security, Availability, Processing Integrity, Confidentiality, and Privacy"},ciscat:',
+        'tsc:{title:"TSC",appId:"tsc",description:"Trust Services Criteria for Security, Availability, Processing Integrity, Confidentiality, and Privacy"},peca:{title:"PECA",appId:"peca",description:"Prevention of Electronic Crimes Act 2016 (PECA) \u2014 Pakistan\'s cybercrime law covering unauthorized access, data theft, and cyber terrorism."},ciscat:'
+    ),
+    # 2. Add peca to agents tab visualisation count
+    (
+        'this.agents={welcome:8,general:11,fim:7,gcp:7,pm:4,vuls:10,oscap:13,ciscat:3,audit:9,gdpr:6,pci:6,hipaa:6,aws:8,tsc:6,nist:5,virustotal:6,configuration:0,osquery:5,docker:5,mitre:6}',
+        'this.agents={welcome:8,general:11,fim:7,gcp:7,pm:4,vuls:10,oscap:13,ciscat:3,audit:9,gdpr:6,pci:6,hipaa:6,aws:8,tsc:6,nist:5,virustotal:6,configuration:0,osquery:5,docker:5,mitre:6,peca:1}'
+    ),
+    # 3. Add peca to overview tab visualisation count
+    (
+        'this.overview={welcome:0,general:6,fim:7,pm:5,vuls:7,oscap:8,ciscat:3,audit:6,pci:6,gdpr:5,hipaa:8,nist:7,aws:8,gcp:5,virustotal:5,osquery:6,sca:0,docker:5,mitre:6,tsc:6}',
+        'this.overview={welcome:0,general:6,fim:7,pm:5,vuls:7,oscap:8,ciscat:3,audit:6,pci:6,gdpr:5,hipaa:8,nist:7,aws:8,gcp:5,virustotal:5,osquery:6,sca:0,docker:5,mitre:6,tsc:6,peca:1}'
+    ),
+    # 4. Add PECADataSource class after GitHubDataSource
+    (
+        'const GITHUB_GROUP_KEY="rule.groups";const GITHUB_GROUP_VALUE="github";class github_data_source_GitHubDataSource extends alerts_data_source_AlertsDataSource{constructor(id,title){super(id,title)}getRuleGroupsFilter(){return super.getRuleGroupsFilter(GITHUB_GROUP_KEY,GITHUB_GROUP_VALUE,constants["p"])}getFixedFilters(){return[...super.getFixedFiltersClusterManager(),...this.getRuleGroupsFilter(),...super.getFixedFilters()]}}',
+        'const GITHUB_GROUP_KEY="rule.groups";const GITHUB_GROUP_VALUE="github";class github_data_source_GitHubDataSource extends alerts_data_source_AlertsDataSource{constructor(id,title){super(id,title)}getRuleGroupsFilter(){return super.getRuleGroupsFilter(GITHUB_GROUP_KEY,GITHUB_GROUP_VALUE,constants["p"])}getFixedFilters(){return[...super.getFixedFiltersClusterManager(),...this.getRuleGroupsFilter(),...super.getFixedFilters()]}}const PECA_GROUP_KEY="rule.groups";const PECA_GROUP_VALUE="peca";class peca_data_source_PECADataSource extends alerts_data_source_AlertsDataSource{constructor(id,title){super(id,title)}getRuleGroupsFilter(){return super.getRuleGroupsFilter(PECA_GROUP_KEY,PECA_GROUP_VALUE,"peca-rule-group")}getFixedFilters(){return[...super.getFixedFiltersClusterManager(),...this.getRuleGroupsFilter(),...super.getFixedFilters()]}}'
+    ),
+    # 5. Add pecaColumns after tscColumns
+    (
+        'const tscColumns=[commonColumns.timestamp,commonColumns["agent.name"],{id:"rule.tsc",initialWidth:283},commonColumns["rule.description"],commonColumns["rule.level"],commonColumns["rule.id"]];const git',
+        'const tscColumns=[commonColumns.timestamp,commonColumns["agent.name"],{id:"rule.tsc",initialWidth:283},commonColumns["rule.description"],commonColumns["rule.level"],commonColumns["rule.id"]];const pecaColumns=[commonColumns.timestamp,commonColumns["agent.name"],{id:"rule.groups",initialWidth:220},commonColumns["rule.description"],commonColumns["rule.level"],commonColumns["rule.id"]];const git'
+    ),
+    # 6. Add peca module config (events tab only)
+    (
+        ',tsc:{init:"dashboard",tabs:[{id:"dashboard",name:"Dashboard",buttons:[ButtonExploreAgent,ButtonModuleGenerateReport],component:DashboardTSC},{id:"inventory",name:"Controls",buttons:[ButtonExploreAgent],component:props=>external_osdSharedDeps_React_default.a.createElement(ComplianceTable,modules_defaults_extends({},props,{DataSource:tsc_data_souce_TSCDataSource}))},renderDiscoverTab({moduleId:"tsc",tableColumns:tscColumns,DataSource:tsc_data_souce_TSCDataSource,categoriesSampleData:[constants["ac"]]})],availableFor:["manager","agent"]},"it-hygiene":',
+        ',tsc:{init:"dashboard",tabs:[{id:"dashboard",name:"Dashboard",buttons:[ButtonExploreAgent,ButtonModuleGenerateReport],component:DashboardTSC},{id:"inventory",name:"Controls",buttons:[ButtonExploreAgent],component:props=>external_osdSharedDeps_React_default.a.createElement(ComplianceTable,modules_defaults_extends({},props,{DataSource:tsc_data_souce_TSCDataSource}))},renderDiscoverTab({moduleId:"tsc",tableColumns:tscColumns,DataSource:tsc_data_souce_TSCDataSource,categoriesSampleData:[constants["ac"]]})],availableFor:["manager","agent"]},peca:{init:"events",tabs:[renderDiscoverTab({moduleId:"peca",tableColumns:pecaColumns,DataSource:peca_data_source_PECADataSource,categoriesSampleData:[]})],availableFor:["manager","agent"]},"it-hygiene":'
+    ),
+]
+
+n = patch_file("$CHUNK2", chunk2_patches)
+print(f"wazuh.chunk.2.js: {n} patch(es) applied.")
+
+# ── wazuh.plugin.js patches ───────────────────────────────────────────────────
+# Build the peca_app definition using the same pattern as the tsc app.
+# We insert it immediately after the closing }; of the tsc constant.
+TSC_END_MARKER = 'void 0:_store\$getState26.id}\`:\"\`}\`}};'
+PECA_APP = (
+    TSC_END_MARKER +
+    'const peca_app={category:"wz-category-security-operations",id:"peca",'
+    'title:_osd_i18n__WEBPACK_IMPORTED_MODULE_0__["i18n"].translate("wz-app-peca-title",{defaultMessage:"PECA"}),'
+    'breadcrumbLabel:_osd_i18n__WEBPACK_IMPORTED_MODULE_0__["i18n"].translate("wz-app-peca-breadcrumbLabel",{defaultMessage:"PECA"}),'
+    'description:_osd_i18n__WEBPACK_IMPORTED_MODULE_0__["i18n"].translate("wz-app-peca-description",{defaultMessage:"Prevention of Electronic Crimes Act 2016 (PECA) - Pakistan\'s cybercrime law covering unauthorized access, data theft, and cyber terrorism."}),'
+    'euiIconType:"users",order:406,showInOverviewApp:true,showInAgentMenu:true,'
+    'redirectTo:()=>{'
+    'var _store\$getState99,_store\$getState100;'
+    'return\`/overview/?tab=peca&tabView=events\${'
+    '(_store\$getState99=_redux_store__WEBPACK_IMPORTED_MODULE_1__["a"].getState())!==null&&_store\$getState99!==void 0'
+    '&&(_store\$getState99=_store\$getState99.appStateReducers)!==null&&_store\$getState99!==void 0'
+    '&&(_store\$getState99=_store\$getState99.currentAgentData)!==null&&_store\$getState99!==void 0'
+    '&&_store\$getState99.id'
+    '?\`&agentId=\${'
+    '(_store\$getState100=_redux_store__WEBPACK_IMPORTED_MODULE_1__["a"].getState())===null||_store\$getState100===void 0'
+    '||(_store\$getState100=_store\$getState100.appStateReducers)===null||_store\$getState100===void 0'
+    '||(_store\$getState100=_store\$getState100.currentAgentData)===null||_store\$getState100===void 0'
+    '?void 0:_store\$getState100.id}\`:\"\`}\`}};'
+)
+
+plugin_patches = [
+    # Insert peca_app definition after tsc definition
+    (TSC_END_MARKER, PECA_APP),
+    # Add peca_app to apps registration array
+    (
+        ',threatHunting,vulnerabilityDetection,mitreAttack,pciDss,hipaa,gdpr,nist80053,tsc,devTools,',
+        ',threatHunting,vulnerabilityDetection,mitreAttack,pciDss,hipaa,gdpr,nist80053,tsc,peca_app,devTools,'
+    ),
+]
+
+n = patch_file("$PLUGIN_JS", plugin_patches)
+print(f"wazuh.plugin.js: {n} patch(es) applied.")
+PYEOF
+
+    if [ $? -ne 0 ]; then
+        error "Bundle patching failed. Restoring originals …"
+        sudo cp "${CHUNK2}.orig" "$CHUNK2"
+        sudo cp "${PLUGIN_JS}.orig" "$PLUGIN_JS"
+        exit 1
+    fi
+
+    # ── 3. Fix ownership on patched bundles ───────────────────────────────────
+    sudo chown wazuh-dashboard:wazuh-dashboard "$CHUNK2" "$PLUGIN_JS"
+
+    # ── 4. Regenerate compressed files ───────────────────────────────────────
+    info "Regenerating compressed bundle files …"
+    sudo apt-get install -y brotli 2>/dev/null | grep -E "^(Get|Inst|Sett)" || true
+
+    for JS_FILE in "$CHUNK2" "$PLUGIN_JS"; do
+        sudo rm -f "${JS_FILE}.gz" "${JS_FILE}.br"
+        sudo gzip -9 -k "$JS_FILE"
+        sudo brotli --best -k "$JS_FILE" -o "${JS_FILE}.br"
+        sudo chown wazuh-dashboard:wazuh-dashboard "${JS_FILE}.gz" "${JS_FILE}.br"
+    done
+    success "Compressed files regenerated."
+
+    # ── 5. Restart dashboard and verify ──────────────────────────────────────
+    info "Restarting wazuh-dashboard …"
+    sudo systemctl restart wazuh-dashboard
+
+    DASH_OK=0
+    for i in $(seq 1 12); do
+        HTTP_CODE=$(curl -sk -o /dev/null -w "%{http_code}" https://localhost/ 2>/dev/null || true)
+        if [ "$HTTP_CODE" = "302" ] || [ "$HTTP_CODE" = "200" ]; then
+            DASH_OK=1; break
+        fi
+        info "  Dashboard not yet up (attempt $i/12) — waiting 5 s …"
+        sleep 5
+    done
+
+    if [ "$DASH_OK" -ne 1 ]; then
+        warn "Dashboard did not come back up. Restoring original bundles …"
+        sudo cp "${CHUNK2}.orig" "$CHUNK2"
+        sudo cp "${PLUGIN_JS}.orig" "$PLUGIN_JS"
+        sudo rm -f "${CHUNK2}.gz" "${CHUNK2}.br" "${PLUGIN_JS}.gz" "${PLUGIN_JS}.br"
+        sudo gzip -9 -k "$CHUNK2" && sudo gzip -9 -k "$PLUGIN_JS"
+        sudo brotli --best -k "$CHUNK2" -o "${CHUNK2}.br" && sudo brotli --best -k "$PLUGIN_JS" -o "${PLUGIN_JS}.br"
+        sudo chown wazuh-dashboard:wazuh-dashboard "$CHUNK2" "$PLUGIN_JS" "${CHUNK2}.gz" "${CHUNK2}.br" "${PLUGIN_JS}.gz" "${PLUGIN_JS}.br"
+        sudo systemctl restart wazuh-dashboard
+        error "PECA module install failed — bundles restored."
+    fi
+
+    success "PECA compliance dashboard module installed."
+    warn "ACTION REQUIRED: Hard-refresh your browser (Ctrl+Shift+R) to clear the bundle cache."
+    warn "PECA will appear in Modules → Security operations, after TSC."
+}
+
+# Run PECA install step if --peca flag is passed
+if [[ "${1:-}" == "--peca" ]]; then
+    REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+    install_peca_module
+    exit 0
+fi
