@@ -1,0 +1,9 @@
+{
+  "id": "localization",
+  "version": "1.0.0",
+  "opensearchDashboardsVersion": "2.19.4",
+  "requiredPlugins": [],
+  "optionalPlugins": ["navigation"],
+  "server": true,
+  "ui": true
+}

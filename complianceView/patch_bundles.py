@@ -225,8 +225,16 @@ CO_APP_ANCHOR_NEW = '}`}};' + CO_APP + 'const docker='
 CO_APP_MARKER     = 'compliance_overview_app'
 
 # ── 8. Apps list ──────────────────────────────────────────────────────────────
+# Primary anchor: assumes peca_app is already in the list (native VM after
+# peca-compliance dashboard patch, or re-runs).
 APPS_LIST_OLD = ',peca_app,devTools,'
 APPS_LIST_NEW = ',peca_app,compliance_overview_app,devTools,'
+
+# Fallback anchor: the end of the apps array on a fresh Wazuh 4.14.3 install
+# where peca_app has not been added yet.  compliance_overview_app is inserted
+# before the .sort() call so the order:407 value places it correctly.
+APPS_LIST_FALLBACK_OLD = ',about,ITHygiene].sort('
+APPS_LIST_FALLBACK_NEW = ',about,ITHygiene,compliance_overview_app].sort('
 
 
 def patch_plugin():
@@ -236,7 +244,15 @@ def patch_plugin():
 
     p, _ = apply_patch_marker(p, CO_APP_ANCHOR_OLD, CO_APP_ANCHOR_NEW, CO_APP_MARKER,
                                'compliance_overview_app definition (order 407)')
-    p, _ = apply_patch(p, APPS_LIST_OLD, APPS_LIST_NEW, 'apps list (insert compliance_overview_app)')
+
+    # Try the primary apps-list anchor first; fall back to the ITHygiene anchor
+    # on fresh installations that do not yet have peca_app in the list.
+    if APPS_LIST_OLD in p:
+        p, _ = apply_patch(p, APPS_LIST_OLD, APPS_LIST_NEW,
+                           'apps list (insert compliance_overview_app after peca_app)')
+    else:
+        p, _ = apply_patch(p, APPS_LIST_FALLBACK_OLD, APPS_LIST_FALLBACK_NEW,
+                           'apps list fallback (insert compliance_overview_app before sort)')
 
     with open(PLUGIN, 'w', encoding='utf-8') as f:
         f.write(p)

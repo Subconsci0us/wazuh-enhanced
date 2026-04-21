@@ -3,8 +3,8 @@
 # install.sh — Build and install the nlqSearch OSD plugin
 #
 # Usage (run as root or with sudo):
-#   cd /path/to/nlqSearch
-#   sudo bash install.sh
+#   sudo bash install.sh              # build, install, restart wazuh-dashboard
+#   sudo bash install.sh --no-restart # build and install only; skip service restart
 #
 # Environment variables (optional — override defaults):
 #   GEMINI_API_KEY    Gemini API key
@@ -16,6 +16,9 @@
 # ────────────────────────────────────────────────────────────────────────────
 
 set -euo pipefail
+
+RESTART=1
+for _arg in "$@"; do [ "$_arg" = "--no-restart" ] && RESTART=0; done
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PLUGIN_ID="nlqSearch"
@@ -174,14 +177,18 @@ echo "      Files installed."
 
 # ── 9. Restart wazuh-dashboard ───────────────────────────────────────────────
 echo ""
-echo "Restarting wazuh-dashboard service…"
-if command -v systemctl >/dev/null 2>&1; then
-  systemctl restart wazuh-dashboard
-  sleep 4
-  STATUS=$(systemctl is-active wazuh-dashboard 2>/dev/null || echo "unknown")
-  echo "Service status: ${STATUS}"
+if [ "$RESTART" -eq 1 ]; then
+  echo "Restarting wazuh-dashboard service…"
+  if command -v systemctl >/dev/null 2>&1; then
+    systemctl restart wazuh-dashboard
+    sleep 4
+    STATUS=$(systemctl is-active wazuh-dashboard 2>/dev/null || echo "unknown")
+    echo "Service status: ${STATUS}"
+  else
+    echo "systemctl not found — please restart wazuh-dashboard manually."
+  fi
 else
-  echo "systemctl not found — please restart wazuh-dashboard manually."
+  echo "Skipping service restart (--no-restart passed)."
 fi
 
 echo ""

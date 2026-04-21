@@ -1,0 +1,17 @@
+{
+  "name": "localization",
+  "version": "1.0.0",
+  "license": "Apache-2.0",
+  "description": "Localization (Urdu/English) and dark mode plugin for Wazuh Dashboard",
+  "scripts": {
+    "build": "webpack --config webpack.config.js --mode production",
+    "build:dev": "webpack --config webpack.config.js --mode development"
+  },
+  "devDependencies": {
+    "webpack": "^5.98.0",
+    "webpack-cli": "^5.1.4"
+  },
+  "opensearchDashboards": {
+    "version": "2.19.4"
+  }
+}

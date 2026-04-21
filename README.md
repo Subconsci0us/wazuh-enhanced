@@ -448,6 +448,101 @@ See `complianceView/README.md` for full architecture and data source documentati
 
 ---
 
+## Testing the Install Script with Docker
+
+This section explains how to verify `setup.sh` on a clean Wazuh environment using Docker — the same procedure used to validate the script before AWS deployment.
+
+### Prerequisites
+
+- Docker CE and the Compose plugin installed (`sudo apt-get install -y docker-ce docker-compose-plugin` or equivalent)
+- At least 3 GB of free RAM (stop other heavy processes first)
+- `vm.max_map_count` set to at least 262144: `sudo sysctl -w vm.max_map_count=262144`
+
+### Step 1 — Start a fresh Wazuh Docker stack
+
+```bash
+# Download the official Wazuh 4.14.3 single-node compose file
+mkdir -p ~/wazuh-docker-test && cd ~/wazuh-docker-test
+curl -fsSL -L https://github.com/wazuh/wazuh-docker/archive/refs/tags/v4.14.3.zip -o wazuh-docker.zip
+unzip -q wazuh-docker.zip
+cd wazuh-docker-4.14.3/single-node
+
+# (Optional) reduce OpenSearch heap for low-memory hosts
+sed -i 's/-Xms1g -Xmx1g/-Xms512m -Xmx512m/' docker-compose.yml
+
+# Generate TLS certificates, then start the stack
+sudo docker compose -f generate-indexer-certs.yml run --rm generator
+sudo docker compose up -d
+
+# Wait ~2.5 minutes, then verify:
+curl -sk https://localhost/ -o /dev/null -w "HTTP %{http_code}\n"   # expect 302
+```
+
+### Step 2 — Copy the repo into each container
+
+```bash
+DASH=$(sudo docker ps --filter "name=dashboard" --format "{{.Names}}")
+MANAGER=$(sudo docker ps --filter "name=manager" --format "{{.Names}}")
+
+sudo docker exec -u root "$DASH" bash -c 'rm -rf /tmp/wazuh-fyp-repo'
+sudo docker cp /path/to/wazuh-fyp-repo "$DASH":/tmp/wazuh-fyp-repo
+sudo docker cp /path/to/wazuh-fyp-repo "$MANAGER":/tmp/wazuh-fyp-repo
+```
+
+### Step 3 — Run the install script
+
+```bash
+# Dashboard plugins (networkGraph, nlqSearch, complianceView, localization)
+sudo docker exec -u root "$DASH" bash \
+    /tmp/wazuh-fyp-repo/setup.sh \
+    --skip aiAssistant pecaRules \
+    --no-restart
+
+# PECA rules (manager container)
+sudo docker exec -u root "$MANAGER" bash \
+    /tmp/wazuh-fyp-repo/setup.sh \
+    --only pecaRules \
+    --no-restart
+
+# Restart the dashboard to activate plugins
+sudo docker restart "$DASH"
+```
+
+> **Why `--skip aiAssistant`?** The `aiAssistant` feature requires LLM API keys and interactive prompts. Test it on a real host with `sudo bash setup.sh --only aiAssistant`.
+
+### Step 4 — Verify
+
+```bash
+# All 4 custom plugins should appear in the "Setting up [55] plugins" log line
+sudo docker logs "$DASH" 2>&1 | grep "plugins-system" | grep "Setting up" | tail -1
+
+# PECA rule smoke test (expects rule id 100100, groups include 'peca')
+sudo docker exec -u root "$MANAGER" bash -c '
+echo "**P1**
+Apr 21 14:00:00 server sshd[1234]: Failed password for invalid user testuser from 192.168.1.100 port 22 ssh2" | \
+    /var/ossec/bin/wazuh-logtest 2>&1 | grep "id:\|groups:"
+'
+```
+
+Expected output:
+```
+id: '100100'
+groups: ['peca', 'authentication_failed', 'peca_3']
+```
+
+### Step 5 — Clean re-test (reproducibility check)
+
+```bash
+cd ~/wazuh-docker-test/wazuh-docker-4.14.3/single-node
+sudo docker compose down -v    # removes volumes too — complete clean slate
+sudo docker compose up -d
+# ... repeat Steps 2–4
+```
+
+The full test log and all issues found during validation are documented in `docker-test-log.md`.
+
+---
+
 ## References
 
 - [Wazuh Documentation](https://documentation.wazuh.com/)

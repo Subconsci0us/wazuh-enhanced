@@ -2,13 +2,14 @@
 # =============================================================================
 # Wazuh FYP — Full Stack Setup Script
 # =============================================================================
-# Tested on: Ubuntu 24.04 LTS / Linux Mint (clean install)
+# Tested on: Ubuntu 24.04 LTS / Linux Mint (clean install), AWS Amazon Linux 2023
 # Run as:    sudo bash setup.sh
 #
 # Usage:
 #   sudo bash setup.sh                              # installs ALL features
 #   sudo bash setup.sh --only networkGraph nlqSearch
 #   sudo bash setup.sh --skip complianceView
+#   sudo bash setup.sh --no-restart                 # skip dashboard restart (e.g. in CI)
 #   sudo bash setup.sh --list
 #   sudo bash setup.sh --help
 #
@@ -18,6 +19,7 @@
 #   networkGraph    Build and install the Network Graph OSD plugin
 #   nlqSearch       Build and install the NLQ Search OSD plugin
 #   complianceView  Patch Wazuh Dashboard bundles to add PECA compliance module
+#   localization    Floating Urdu/English toolbar + dark mode
 # =============================================================================
 
 set -uo pipefail
@@ -36,6 +38,61 @@ warn()    { echo -e "${YELLOW}[WARN]${NC}  $*"; }
 error()   { echo -e "${RED}[ERROR]${NC} $*" >&2; }
 fatal()   { echo -e "${RED}[FATAL]${NC} $*" >&2; exit 1; }
 
+# ── Portable sudo: no-op when already root (e.g. inside Docker), sudo -E otherwise
+# This lets the script be used both as `sudo bash setup.sh` and as
+# `docker exec -u root container bash setup.sh --no-restart`.
+_sudo() {
+    if [ "$(id -u)" -eq 0 ]; then
+        "$@"
+    else
+        # -E preserves the environment (including PATH changes from ensure_node)
+        sudo -E "$@"
+    fi
+}
+
+# ── Auto-detect or install Node.js + npm ──────────────────────────────────────
+# Wazuh Docker images and some minimal AWS AMIs ship only the OSD-bundled node
+# binary with no system-level npm.  This function ensures both are available.
+ensure_node() {
+    # Fast path: already have everything
+    if command -v node >/dev/null 2>&1 && command -v npm >/dev/null 2>&1; then
+        return 0
+    fi
+
+    # Check for the Node.js binary bundled inside the Wazuh Dashboard installation
+    OSD_NODE_BIN="/usr/share/wazuh-dashboard/node/bin"
+    if [ -x "${OSD_NODE_BIN}/node" ] && ! command -v node >/dev/null 2>&1; then
+        export PATH="${OSD_NODE_BIN}:${PATH}"
+        info "Using Wazuh-bundled Node: $(node --version)"
+    fi
+
+    # Install npm if still missing (bundled OSD node does not ship npm)
+    if ! command -v npm >/dev/null 2>&1; then
+        info "npm not found — installing via system package manager …"
+        if command -v apt-get >/dev/null 2>&1; then
+            _sudo apt-get install -y npm 2>&1 | grep -E "^(Get|Inst|Sett|Err)" || true
+        elif command -v yum >/dev/null 2>&1; then
+            _sudo yum install -y npm 2>&1 | grep -E "^(Installed|Updated|Error)" || true
+        fi
+    fi
+
+    # If node itself is still missing, install the full nodejs package
+    if ! command -v node >/dev/null 2>&1 || ! command -v npm >/dev/null 2>&1; then
+        info "Installing Node.js + npm from package manager …"
+        if command -v apt-get >/dev/null 2>&1; then
+            _sudo apt-get install -y nodejs npm 2>&1 | grep -E "^(Get|Inst|Sett|Err)" || true
+        elif command -v yum >/dev/null 2>&1; then
+            _sudo yum install -y nodejs npm 2>&1 | grep -E "^(Installed|Updated|Error)" || true
+        else
+            fatal "Cannot install Node.js: no supported package manager (apt-get / yum) found."
+        fi
+    fi
+
+    command -v node >/dev/null 2>&1 || fatal "node is required but could not be installed."
+    command -v npm  >/dev/null 2>&1 || fatal "npm is required but could not be installed."
+    info "Node: $(node --version)  npm: $(npm --version)"
+}
+
 # ── Locate repo root ───────────────────────────────────────────────────────────
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
@@ -43,7 +100,7 @@ REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # Feature Registry
 # =============================================================================
 # ALL_FEATURES defines the canonical install order.
-ALL_FEATURES=(pecaRules aiAssistant networkGraph nlqSearch complianceView)
+ALL_FEATURES=(pecaRules aiAssistant networkGraph nlqSearch complianceView localization)
 
 declare -A FEATURE_DESC
 FEATURE_DESC[pecaRules]="Deploy PECA compliance detection rules to Wazuh Manager"
@@ -51,6 +108,7 @@ FEATURE_DESC[aiAssistant]="MCP Server + LLM Gateway + Dashboard AI chat plugins 
 FEATURE_DESC[networkGraph]="Build and install the Network Graph OSD plugin"
 FEATURE_DESC[nlqSearch]="Build and install the NLQ Search OSD plugin"
 FEATURE_DESC[complianceView]="Comparative Compliance View — unified OSD plugin comparing PCI DSS, HIPAA, GDPR, NIST, TSC, PECA"
+FEATURE_DESC[localization]="Floating toolbar with Urdu/English toggle and dark mode for the entire dashboard"
 
 # =============================================================================
 # Argument Parsing
@@ -58,6 +116,7 @@ FEATURE_DESC[complianceView]="Comparative Compliance View — unified OSD plugin
 MODE="all"
 ONLY_FEATURES=()
 SKIP_FEATURES=()
+NO_RESTART=0
 
 show_help() {
     echo -e "${BOLD}Usage:${NC}"
@@ -67,6 +126,7 @@ show_help() {
     echo "  (none)                        Install ALL features (default)"
     echo "  --only FEATURE [FEATURE ...]  Install only the listed features"
     echo "  --skip FEATURE [FEATURE ...]  Install everything except listed features"
+    echo "  --no-restart                  Skip the final wazuh-dashboard service restart"
     echo "  --list                        Print available features and exit"
     echo "  --help                        Print this help message and exit"
     echo ""
@@ -79,6 +139,7 @@ show_help() {
     echo "  sudo bash setup.sh"
     echo "  sudo bash setup.sh --only networkGraph nlqSearch"
     echo "  sudo bash setup.sh --skip complianceView"
+    echo "  sudo bash setup.sh --no-restart"
     echo "  sudo bash setup.sh --list"
 }
 
@@ -101,6 +162,9 @@ while [ "$i" -le "$#" ]; do
         --list|-l)
             show_list
             exit 0
+            ;;
+        --no-restart)
+            NO_RESTART=1
             ;;
         --only)
             [ "$MODE" = "skip" ] && fatal "--only and --skip are mutually exclusive."
@@ -194,18 +258,29 @@ done
 shared_setup() {
     info "=== Shared Setup: Checking prerequisites ==="
 
-    # ── Wazuh all-in-one ──────────────────────────────────────────────────────
-    if systemctl is-active --quiet wazuh-manager 2>/dev/null; then
-        warn "wazuh-manager is already running — skipping Wazuh install."
-    else
-        info "Downloading wazuh-install.sh …"
-        curl -sO https://packages.wazuh.com/4.14/wazuh-install.sh \
-            || fatal "Failed to download Wazuh installer."
-        info "Running Wazuh installer (this takes several minutes) …"
-        sudo bash ./wazuh-install.sh -a \
-            || fatal "Wazuh all-in-one installer failed."
-        success "Wazuh installer completed."
+    # Detect existing Wazuh installation via filesystem artifacts.
+    # This handles: native install (systemctl), Docker containers (no systemctl),
+    # and any environment where the dashboard or manager files are already present.
+    local WAZUH_INSTALLED=0
+    if [ -d "/usr/share/wazuh-dashboard" ] || [ -d "/var/ossec" ]; then
+        WAZUH_INSTALLED=1
+    elif command -v systemctl >/dev/null 2>&1 && systemctl is-active --quiet wazuh-manager 2>/dev/null; then
+        WAZUH_INSTALLED=1
     fi
+
+    if [ "$WAZUH_INSTALLED" -eq 1 ]; then
+        warn "Wazuh already installed — skipping installer and indexer health check."
+        return 0
+    fi
+
+    # ── Fresh all-in-one install ──────────────────────────────────────────────
+    info "Downloading wazuh-install.sh …"
+    curl -sO https://packages.wazuh.com/4.14/wazuh-install.sh \
+        || fatal "Failed to download Wazuh installer."
+    info "Running Wazuh installer (this takes several minutes) …"
+    _sudo bash ./wazuh-install.sh -a \
+        || fatal "Wazuh all-in-one installer failed."
+    success "Wazuh installer completed."
 
     info "Waiting for Wazuh Indexer (OpenSearch) to become healthy …"
     RETRIES=60
@@ -233,7 +308,24 @@ install_pecaRules() {
         return 1
     fi
 
-    sudo cp "$RULES_SRC"/*.xml "$RULES_DEST/" || { error "Failed to copy rules to $RULES_DEST"; return 1; }
+    if [ ! -d "$RULES_DEST" ]; then
+        error "$RULES_DEST does not exist — is this the Wazuh Manager host?"
+        return 1
+    fi
+
+    _sudo cp "$RULES_SRC"/*.xml "$RULES_DEST/" || { error "Failed to copy rules to $RULES_DEST"; return 1; }
+
+    # Match the ownership and permissions of other rules files so the manager
+    # process can read them.  Detect dynamically: typically wazuh:wazuh in Docker /
+    # Amazon Linux, ossec:ossec on native Ubuntu installs.
+    _RULES_OWNER=$(stat -c '%U:%G' "$RULES_DEST/local_rules.xml" 2>/dev/null \
+        || stat -f '%Su:%Sg' "$RULES_DEST/local_rules.xml" 2>/dev/null \
+        || echo "wazuh:wazuh")
+    for _xml in "$RULES_DEST"/peca_*.xml; do
+        [ -f "$_xml" ] || continue
+        _sudo chown "$_RULES_OWNER" "$_xml" || true
+        _sudo chmod 660 "$_xml"             || true
+    done
     success "Rules copied to $RULES_DEST."
 
     # ── Check for rule ID conflicts ───────────────────────────────────────────
@@ -244,10 +336,10 @@ install_pecaRules() {
     for _f in "$RULES_DEST"/*.xml; do
         [ "$(basename "$_f")" = "peca_rules.xml" ] && continue
         OTHER_IDS="$OTHER_IDS
-$(sudo grep -oP '(?<=id=")[0-9]+' "$_f" 2>/dev/null)"
+$(_sudo grep -oP '(?<=id=")[0-9]+' "$_f" 2>/dev/null)"
     done
     OTHER_IDS=$(echo "$OTHER_IDS" | sort -u | grep -v '^$')
-    PECA_IDS=$(sudo grep -oP '(?<=id=")[0-9]+' "$PECA_FILE" 2>/dev/null)
+    PECA_IDS=$(_sudo grep -oP '(?<=id=")[0-9]+' "$PECA_FILE" 2>/dev/null)
 
     CONFLICTS=""
     for _id in $PECA_IDS; do
@@ -259,8 +351,8 @@ $(sudo grep -oP '(?<=id=")[0-9]+' "$_f" 2>/dev/null)"
         warn "Rule ID conflicts detected: $CONFLICTS"
         warn "Renumbering conflicting PECA rules starting from 100100 …"
         PECA_TMP=$(mktemp)
-        sudo cp "$PECA_FILE" "$PECA_TMP"
-        sudo chmod 644 "$PECA_TMP"
+        _sudo cp "$PECA_FILE" "$PECA_TMP"
+        _sudo chmod 644 "$PECA_TMP"
         NEXT_ID=100100
         ASSIGNED=""
         for _old in $CONFLICTS; do
@@ -272,16 +364,22 @@ $(sudo grep -oP '(?<=id=")[0-9]+' "$_f" 2>/dev/null)"
             ASSIGNED="$ASSIGNED $NEXT_ID"
             NEXT_ID=$((NEXT_ID + 1))
         done
-        sudo cp "$PECA_TMP" "$PECA_FILE"
+        _sudo cp "$PECA_TMP" "$PECA_FILE"
         rm -f "$PECA_TMP"
         success "PECA rules renumbered."
     else
         info "No rule ID conflicts found."
     fi
 
-    info "Restarting wazuh-manager …"
-    sudo systemctl restart wazuh-manager || { error "Failed to restart wazuh-manager"; return 1; }
-    success "wazuh-manager restarted."
+    # Restart wazuh-manager only if systemctl is available (not in Docker)
+    if command -v systemctl >/dev/null 2>&1; then
+        info "Restarting wazuh-manager …"
+        _sudo systemctl restart wazuh-manager || { error "Failed to restart wazuh-manager"; return 1; }
+        success "wazuh-manager restarted."
+    else
+        warn "systemctl not available — skipping wazuh-manager restart."
+        warn "PECA rules will take effect when the manager process is next restarted."
+    fi
 }
 
 # =============================================================================
@@ -293,26 +391,26 @@ install_aiAssistant() {
     # ── C: OpenSearch MCP Server ──────────────────────────────────────────────
     info "--- C: Setting up OpenSearch MCP Server ---"
 
-    sudo mkdir -p /opt/mcp_server-env /var/log/mcp_server /etc/mcp-server
-    sudo useradd --system --no-create-home --shell /usr/sbin/nologin mcpserver 2>/dev/null || true
-    sudo chown -R root:root /etc/mcp-server
-    sudo chmod 750 /etc/mcp-server
-    sudo touch /etc/mcp-server/mcp-server.env
-    sudo chmod 640 /etc/mcp-server/mcp-server.env
-    sudo chown -R mcpserver:mcpserver /var/log/mcp_server
-    sudo chmod 750 /var/log/mcp_server
+    _sudo mkdir -p /opt/mcp_server-env /var/log/mcp_server /etc/mcp-server
+    _sudo useradd --system --no-create-home --shell /usr/sbin/nologin mcpserver 2>/dev/null || true
+    _sudo chown -R root:root /etc/mcp-server
+    _sudo chmod 750 /etc/mcp-server
+    _sudo touch /etc/mcp-server/mcp-server.env
+    _sudo chmod 640 /etc/mcp-server/mcp-server.env
+    _sudo chown -R mcpserver:mcpserver /var/log/mcp_server
+    _sudo chmod 750 /var/log/mcp_server
 
     info "Creating Python venv at /opt/mcp_server-env …"
-    sudo apt-get install -y python3-venv python3-pip 2>/dev/null | grep -E "^(Get|Inst|Sett)" || true
-    sudo python3 -m venv /opt/mcp_server-env \
+    _sudo apt-get install -y python3-venv python3-pip 2>/dev/null | grep -E "^(Get|Inst|Sett)" || true
+    _sudo python3 -m venv /opt/mcp_server-env \
         || { error "Failed to create mcp_server venv"; return 1; }
-    sudo /opt/mcp_server-env/bin/pip install --quiet --upgrade pip
-    sudo /opt/mcp_server-env/bin/pip install --quiet opensearch-mcp-server-py \
+    _sudo /opt/mcp_server-env/bin/pip install --quiet --upgrade pip
+    _sudo /opt/mcp_server-env/bin/pip install --quiet opensearch-mcp-server-py \
         || { error "Failed to install opensearch-mcp-server-py"; return 1; }
     success "opensearch-mcp-server-py installed."
 
     if [ ! -s /etc/mcp-server/mcp-server.env ]; then
-        sudo cp "$REPO_DIR/ai-assistant/mcp-server.env.example" /etc/mcp-server/mcp-server.env
+        _sudo cp "$REPO_DIR/ai-assistant/mcp-server.env.example" /etc/mcp-server/mcp-server.env
         echo ""
         warn "ACTION REQUIRED: Fill in Wazuh Indexer credentials:"
         warn "  sudo nano /etc/mcp-server/mcp-server.env"
@@ -320,35 +418,35 @@ install_aiAssistant() {
         read -r _
     fi
 
-    sudo cp "$REPO_DIR/ai-assistant/services/mcp-server.service" /etc/systemd/system/mcp-server.service
-    sudo systemctl daemon-reload
-    sudo systemctl enable mcp-server
-    sudo systemctl restart mcp-server || { error "Failed to start mcp-server"; return 1; }
+    _sudo cp "$REPO_DIR/ai-assistant/services/mcp-server.service" /etc/systemd/system/mcp-server.service
+    _sudo systemctl daemon-reload
+    _sudo systemctl enable mcp-server
+    _sudo systemctl restart mcp-server || { error "Failed to start mcp-server"; return 1; }
     success "mcp-server service enabled and started."
 
     # ── D: MCP-LLM Gateway ───────────────────────────────────────────────────
     info "--- D: Setting up MCP-LLM Gateway ---"
 
-    sudo mkdir -p /opt/mcp_llm_gateway-env /var/log/mcp_llm_gateway /etc/mcp-llm-gateway
-    sudo useradd --system --no-create-home --shell /usr/sbin/nologin mcpgateway 2>/dev/null || true
-    sudo chown root:mcpgateway /etc/mcp-llm-gateway
-    sudo chmod 750 /etc/mcp-llm-gateway
-    sudo touch /etc/mcp-llm-gateway/mcp-llm-gateway.env
-    sudo touch /etc/mcp-llm-gateway/mcp-llm-gateway.prompt
-    sudo chown root:mcpgateway /etc/mcp-llm-gateway/mcp-llm-gateway.env
-    sudo chown root:mcpgateway /etc/mcp-llm-gateway/mcp-llm-gateway.prompt
-    sudo chmod 640 /etc/mcp-llm-gateway/mcp-llm-gateway.env
-    sudo chmod 640 /etc/mcp-llm-gateway/mcp-llm-gateway.prompt
-    sudo chown -R mcpgateway:mcpgateway /var/log/mcp_llm_gateway
-    sudo chmod 750 /var/log/mcp_llm_gateway
+    _sudo mkdir -p /opt/mcp_llm_gateway-env /var/log/mcp_llm_gateway /etc/mcp-llm-gateway
+    _sudo useradd --system --no-create-home --shell /usr/sbin/nologin mcpgateway 2>/dev/null || true
+    _sudo chown root:mcpgateway /etc/mcp-llm-gateway
+    _sudo chmod 750 /etc/mcp-llm-gateway
+    _sudo touch /etc/mcp-llm-gateway/mcp-llm-gateway.env
+    _sudo touch /etc/mcp-llm-gateway/mcp-llm-gateway.prompt
+    _sudo chown root:mcpgateway /etc/mcp-llm-gateway/mcp-llm-gateway.env
+    _sudo chown root:mcpgateway /etc/mcp-llm-gateway/mcp-llm-gateway.prompt
+    _sudo chmod 640 /etc/mcp-llm-gateway/mcp-llm-gateway.env
+    _sudo chmod 640 /etc/mcp-llm-gateway/mcp-llm-gateway.prompt
+    _sudo chown -R mcpgateway:mcpgateway /var/log/mcp_llm_gateway
+    _sudo chmod 750 /var/log/mcp_llm_gateway
 
     info "Creating Python venv at /opt/mcp_llm_gateway-env …"
-    sudo python3 -m venv /opt/mcp_llm_gateway-env \
+    _sudo python3 -m venv /opt/mcp_llm_gateway-env \
         || { error "Failed to create gateway venv"; return 1; }
-    sudo /opt/mcp_llm_gateway-env/bin/pip install --quiet --upgrade pip
+    _sudo /opt/mcp_llm_gateway-env/bin/pip install --quiet --upgrade pip
 
     info "Installing pinned Python dependencies …"
-    sudo /opt/mcp_llm_gateway-env/bin/pip install --quiet \
+    _sudo /opt/mcp_llm_gateway-env/bin/pip install --quiet \
         "fastapi==0.128.0" \
         "uvicorn[standard]==0.40.0" \
         "pydantic==2.12.5" \
@@ -363,16 +461,16 @@ install_aiAssistant() {
         || { error "Failed to install gateway dependencies"; return 1; }
     success "Gateway dependencies installed."
 
-    sudo cp "$REPO_DIR/ai-assistant/mcp_llm_gateway.py" /opt/mcp_llm_gateway-env/mcp_llm_gateway.py
-    sudo chmod 644 /opt/mcp_llm_gateway-env/mcp_llm_gateway.py
-    sudo cp "$REPO_DIR/ai-assistant/mcp-llm-gateway.prompt" /etc/mcp-llm-gateway/mcp-llm-gateway.prompt
-    sudo chown root:mcpgateway /etc/mcp-llm-gateway/mcp-llm-gateway.prompt
-    sudo chmod 640 /etc/mcp-llm-gateway/mcp-llm-gateway.prompt
+    _sudo cp "$REPO_DIR/ai-assistant/mcp_llm_gateway.py" /opt/mcp_llm_gateway-env/mcp_llm_gateway.py
+    _sudo chmod 644 /opt/mcp_llm_gateway-env/mcp_llm_gateway.py
+    _sudo cp "$REPO_DIR/ai-assistant/mcp-llm-gateway.prompt" /etc/mcp-llm-gateway/mcp-llm-gateway.prompt
+    _sudo chown root:mcpgateway /etc/mcp-llm-gateway/mcp-llm-gateway.prompt
+    _sudo chmod 640 /etc/mcp-llm-gateway/mcp-llm-gateway.prompt
 
     if [ ! -s /etc/mcp-llm-gateway/mcp-llm-gateway.env ]; then
-        sudo cp "$REPO_DIR/ai-assistant/mcp-llm-gateway.env.example" /etc/mcp-llm-gateway/mcp-llm-gateway.env
-        sudo chown root:mcpgateway /etc/mcp-llm-gateway/mcp-llm-gateway.env
-        sudo chmod 640 /etc/mcp-llm-gateway/mcp-llm-gateway.env
+        _sudo cp "$REPO_DIR/ai-assistant/mcp-llm-gateway.env.example" /etc/mcp-llm-gateway/mcp-llm-gateway.env
+        _sudo chown root:mcpgateway /etc/mcp-llm-gateway/mcp-llm-gateway.env
+        _sudo chmod 640 /etc/mcp-llm-gateway/mcp-llm-gateway.env
         echo ""
         warn "ACTION REQUIRED: Fill in LLM credentials:"
         warn "  sudo nano /etc/mcp-llm-gateway/mcp-llm-gateway.env"
@@ -381,10 +479,10 @@ install_aiAssistant() {
         read -r _
     fi
 
-    sudo cp "$REPO_DIR/ai-assistant/services/mcp-llm-gateway.service" /etc/systemd/system/mcp-llm-gateway.service
-    sudo systemctl daemon-reload
-    sudo systemctl enable mcp-llm-gateway
-    sudo systemctl restart mcp-llm-gateway || { error "Failed to start mcp-llm-gateway"; return 1; }
+    _sudo cp "$REPO_DIR/ai-assistant/services/mcp-llm-gateway.service" /etc/systemd/system/mcp-llm-gateway.service
+    _sudo systemctl daemon-reload
+    _sudo systemctl enable mcp-llm-gateway
+    _sudo systemctl restart mcp-llm-gateway || { error "Failed to start mcp-llm-gateway"; return 1; }
     success "mcp-llm-gateway service enabled and started."
 
     # ── E: Dashboard AI-assistant plugins ────────────────────────────────────
@@ -392,7 +490,7 @@ install_aiAssistant() {
 
     OSD_PKG="/usr/share/wazuh-dashboard/package.json"
     if [ ! -r "$OSD_PKG" ]; then
-        OSD_VERSION=$(sudo python3 -c "import json; d=json.load(open('$OSD_PKG')); print(d['version'])" 2>/dev/null) \
+        OSD_VERSION=$(_sudo python3 -c "import json; d=json.load(open('$OSD_PKG')); print(d['version'])" 2>/dev/null) \
             || { error "Could not determine OSD version from $OSD_PKG"; return 1; }
     else
         OSD_VERSION=$(python3 -c "import json; d=json.load(open('$OSD_PKG')); print(d['version'])") \
@@ -417,29 +515,29 @@ install_aiAssistant() {
 
     PLUGINS_DEST="/usr/share/wazuh-dashboard/plugins"
     info "Copying plugins to $PLUGINS_DEST …"
-    sudo cp -r "$EXTRACT_DIR/plugins/assistantDashboards/" "$PLUGINS_DEST/"
-    sudo cp -r "$EXTRACT_DIR/plugins/mlCommonsDashboards/" "$PLUGINS_DEST/"
-    sudo chown -R wazuh-dashboard:wazuh-dashboard "$PLUGINS_DEST/assistantDashboards/"
-    sudo chown -R wazuh-dashboard:wazuh-dashboard "$PLUGINS_DEST/mlCommonsDashboards/"
-    sudo chmod -R 750 "$PLUGINS_DEST/assistantDashboards/"
-    sudo chmod -R 750 "$PLUGINS_DEST/mlCommonsDashboards/"
+    _sudo cp -r "$EXTRACT_DIR/plugins/assistantDashboards/" "$PLUGINS_DEST/"
+    _sudo cp -r "$EXTRACT_DIR/plugins/mlCommonsDashboards/" "$PLUGINS_DEST/"
+    _sudo chown -R wazuh-dashboard:wazuh-dashboard "$PLUGINS_DEST/assistantDashboards/"
+    _sudo chown -R wazuh-dashboard:wazuh-dashboard "$PLUGINS_DEST/mlCommonsDashboards/"
+    _sudo chmod -R 750 "$PLUGINS_DEST/assistantDashboards/"
+    _sudo chmod -R 750 "$PLUGINS_DEST/mlCommonsDashboards/"
     success "AI assistant plugins copied to $PLUGINS_DEST."
 
     DASH_YML="/etc/wazuh-dashboard/opensearch_dashboards.yml"
-    if ! sudo grep -q "assistant.chat.enabled" "$DASH_YML" 2>/dev/null; then
-        echo "assistant.chat.enabled: true" | sudo tee -a "$DASH_YML" > /dev/null
+    if ! _sudo grep -q "assistant.chat.enabled" "$DASH_YML" 2>/dev/null; then
+        echo "assistant.chat.enabled: true" | _sudo tee -a "$DASH_YML" > /dev/null
         success "Added assistant.chat.enabled: true to $DASH_YML"
     else
         info "assistant.chat.enabled already present in $DASH_YML — skipping."
     fi
 
     info "Personalising Dashboard Assistant UI …"
-    sudo apt-get install -y brotli 2>/dev/null | grep -E "^(Get|Inst|Sett)" || true
+    _sudo apt-get install -y brotli 2>/dev/null | grep -E "^(Get|Inst|Sett)" || true
     DASH_UI_SCRIPT=$(mktemp /tmp/dashboard-assistant-ui-XXXXXX.sh)
     curl -s "https://raw.githubusercontent.com/wazuh/integrations/main/integrations/AI_assistant/config/dashboard/dashboard-assistant-ui.sh" \
         -o "$DASH_UI_SCRIPT" \
         && chmod +x "$DASH_UI_SCRIPT" \
-        && sudo bash "$DASH_UI_SCRIPT" \
+        && _sudo bash "$DASH_UI_SCRIPT" \
         && success "Dashboard UI personalisation applied." \
         || warn "Dashboard UI personalisation failed (non-fatal — continuing)."
 
@@ -615,17 +713,14 @@ install_networkGraph() {
         error "networkGraph directory not found at $NET_DIR"
         return 1
     fi
-    if ! command -v node >/dev/null 2>&1; then
-        error "node not found — cannot build networkGraph plugin"
-        return 1
-    fi
-    if ! command -v npm >/dev/null 2>&1; then
-        error "npm not found — cannot build networkGraph plugin"
-        return 1
-    fi
+
+    ensure_node
+
+    local _NORESTART=""
+    [ "${NO_RESTART}" -eq 1 ] && _NORESTART="--no-restart"
 
     info "Running networkGraph/install.sh …"
-    (cd "$NET_DIR" && sudo -E bash install.sh) \
+    (cd "$NET_DIR" && _sudo bash install.sh ${_NORESTART}) \
         || { error "networkGraph/install.sh failed"; return 1; }
     success "Network Graph plugin installed."
 }
@@ -641,17 +736,14 @@ install_nlqSearch() {
         error "nlqSearch directory not found at $NLQ_DIR"
         return 1
     fi
-    if ! command -v node >/dev/null 2>&1; then
-        error "node not found — cannot build nlqSearch plugin"
-        return 1
-    fi
-    if ! command -v npm >/dev/null 2>&1; then
-        error "npm not found — cannot build nlqSearch plugin"
-        return 1
-    fi
+
+    ensure_node
+
+    local _NORESTART=""
+    [ "${NO_RESTART}" -eq 1 ] && _NORESTART="--no-restart"
 
     info "Running nlqSearch/install.sh …"
-    (cd "$NLQ_DIR" && sudo -E bash install.sh) \
+    (cd "$NLQ_DIR" && _sudo bash install.sh ${_NORESTART}) \
         || { error "nlqSearch/install.sh failed"; return 1; }
 
     if [ -z "${GEMINI_API_KEY:-}" ]; then
@@ -680,17 +772,14 @@ install_complianceView() {
         error "complianceView directory not found at $CV_DIR — is the repo complete?"
         return 1
     fi
-    if ! command -v node >/dev/null 2>&1; then
-        error "node not found — cannot build complianceView plugin"
-        return 1
-    fi
-    if ! command -v npm >/dev/null 2>&1; then
-        error "npm not found — cannot build complianceView plugin"
-        return 1
-    fi
+
+    ensure_node
+
+    local _NORESTART=""
+    [ "${NO_RESTART}" -eq 1 ] && _NORESTART="--no-restart"
 
     info "Building and installing complianceView OSD plugin (API routes) …"
-    (cd "$CV_DIR" && sudo -E bash install.sh) \
+    (cd "$CV_DIR" && _sudo bash install.sh ${_NORESTART}) \
         || { error "complianceView/install.sh failed"; return 1; }
 
     # ── Step 2: Patch Wazuh bundle to add the native Security Operations entry ──
@@ -704,30 +793,84 @@ install_complianceView() {
     fi
 
     info "Backing up original bundle files (if not already done) …"
-    [ -f "${CHUNK2}.orig"    ] || sudo cp "$CHUNK2"    "${CHUNK2}.orig"
-    [ -f "${PLUGIN_JS}.orig" ] || sudo cp "$PLUGIN_JS" "${PLUGIN_JS}.orig"
+    [ -f "${CHUNK2}.orig"    ] || _sudo cp "$CHUNK2"    "${CHUNK2}.orig"
+    [ -f "${PLUGIN_JS}.orig" ] || _sudo cp "$PLUGIN_JS" "${PLUGIN_JS}.orig"
 
     info "Applying bundle patches …"
-    sudo python3 "$CV_DIR/patch_bundles.py" \
+    _sudo python3 "$CV_DIR/patch_bundles.py" \
         || { error "Bundle patch script failed — restoring originals …"
-             sudo cp "${CHUNK2}.orig"    "$CHUNK2"
-             sudo cp "${PLUGIN_JS}.orig" "$PLUGIN_JS"
+             _sudo cp "${CHUNK2}.orig"    "$CHUNK2"
+             _sudo cp "${PLUGIN_JS}.orig" "$PLUGIN_JS"
              return 1; }
 
-    info "Regenerating compressed bundle files …"
-    sudo apt-get install -y brotli 2>/dev/null | grep -E "^(Get|Inst|Sett)" || true
-    for JS_FILE in "$CHUNK2" "$PLUGIN_JS"; do
-        sudo rm -f "${JS_FILE}.gz" "${JS_FILE}.br"
-        sudo gzip -9 -k "$JS_FILE"   || { error "gzip failed for $JS_FILE"; return 1; }
-        sudo brotli --best -k "$JS_FILE" -o "${JS_FILE}.br" \
-            || { error "brotli failed for $JS_FILE"; return 1; }
-        sudo chown wazuh-dashboard:wazuh-dashboard "${JS_FILE}.gz" "${JS_FILE}.br"
-    done
-    sudo chown wazuh-dashboard:wazuh-dashboard "$CHUNK2" "$PLUGIN_JS"
-    success "Bundle patches applied."
+    # ── Step 3: Regenerate compressed bundle files ────────────────────────────
+    # The dashboard prefers .br > .gz > .js when serving bundles.
+    # We must remove the old compressed variants so it serves the patched .js.
+    # Regenerating them is optional (the dashboard falls back to .js), but
+    # improves performance on production deployments.
+    info "Updating compressed bundle files …"
 
+    # Try to install compression tools via the available package manager
+    if ! command -v brotli >/dev/null 2>&1; then
+        if command -v apt-get >/dev/null 2>&1; then
+            _sudo apt-get install -y brotli 2>/dev/null | grep -E "^(Get|Inst|Sett)" || true
+        elif command -v yum >/dev/null 2>&1; then
+            _sudo yum install -y brotli 2>/dev/null | grep -E "^(Installed|Updated)" || true
+        fi
+    fi
+
+    for JS_FILE in "$CHUNK2" "$PLUGIN_JS"; do
+        # Remove old compressed files first — critical so the dashboard serves
+        # the patched .js rather than the stale compressed originals.
+        _sudo rm -f "${JS_FILE}.gz" "${JS_FILE}.br"
+
+        # Regenerate .gz if gzip is available
+        if command -v gzip >/dev/null 2>&1; then
+            _sudo gzip -9 -k "$JS_FILE" \
+                && _sudo chown wazuh-dashboard:wazuh-dashboard "${JS_FILE}.gz" \
+                || warn "gzip failed for $(basename "$JS_FILE") — .gz variant skipped"
+        else
+            warn "gzip not found — .gz variant skipped for $(basename "$JS_FILE")"
+        fi
+
+        # Regenerate .br if brotli is available
+        if command -v brotli >/dev/null 2>&1; then
+            _sudo brotli --best -k "$JS_FILE" -o "${JS_FILE}.br" \
+                && _sudo chown wazuh-dashboard:wazuh-dashboard "${JS_FILE}.br" \
+                || warn "brotli failed for $(basename "$JS_FILE") — .br variant skipped"
+        else
+            warn "brotli not found — .br variant skipped for $(basename "$JS_FILE")"
+        fi
+
+        _sudo chown wazuh-dashboard:wazuh-dashboard "$JS_FILE"
+    done
+
+    success "Bundle patches applied."
     success "Compliance Overview installed in Security Operations tab."
     warn "Hard-refresh your browser (Ctrl+Shift+R) after the dashboard restarts."
+}
+
+# =============================================================================
+# Feature: localization
+# =============================================================================
+install_localization() {
+    info "=== Feature: localization — Building and installing Localization plugin ==="
+
+    LOC_DIR="$REPO_DIR/localization"
+    if [ ! -d "$LOC_DIR" ]; then
+        error "localization directory not found at $LOC_DIR"
+        return 1
+    fi
+
+    ensure_node
+
+    local _NORESTART=""
+    [ "${NO_RESTART}" -eq 1 ] && _NORESTART="--no-restart"
+
+    info "Running localization/install.sh …"
+    (cd "$LOC_DIR" && _sudo bash install.sh ${_NORESTART}) \
+        || { error "localization/install.sh failed"; return 1; }
+    success "Localization plugin installed. Floating toolbar visible on all dashboard pages."
 }
 
 # =============================================================================
@@ -744,6 +887,8 @@ case "$MODE" in
     only)  info "Mode: install ONLY — ${FEATURES_TO_RUN[*]}" ;;
     skip)  info "Mode: install all EXCEPT — ${SKIP_FEATURES[*]}" ;;
 esac
+
+[ "${NO_RESTART}" -eq 1 ] && info "Restart: DISABLED (--no-restart)"
 
 if [ "${#FEATURES_TO_RUN[@]}" -eq 0 ]; then
     warn "No features selected — nothing to install."
@@ -784,25 +929,35 @@ done
 # ── Single dashboard restart (after all features) ──────────────────────────────
 if [ "$NEEDS_DASH_RESTART" -eq 1 ]; then
     echo ""
-    info "Restarting wazuh-dashboard (once, after all features installed) …"
-    sudo systemctl restart wazuh-dashboard
-
-    DASH_OK=0
-    for i in $(seq 1 12); do
-        HTTP_CODE=$(curl -sk -o /dev/null -w "%{http_code}" https://localhost/ 2>/dev/null || true)
-        if [ "$HTTP_CODE" = "302" ] || [ "$HTTP_CODE" = "200" ]; then
-            DASH_OK=1
-            break
-        fi
-        info "  Dashboard not yet up (attempt $i/12) — waiting 5 s …"
-        sleep 5
-    done
-
-    if [ "$DASH_OK" -ne 1 ]; then
-        warn "Dashboard did not come back up. Check logs:"
-        warn "  sudo journalctl -u wazuh-dashboard -n 50"
+    if [ "${NO_RESTART}" -eq 1 ]; then
+        info "Skipping wazuh-dashboard restart (--no-restart passed)."
+        info "Restart the dashboard manually when ready:"
+        info "  systemctl restart wazuh-dashboard   # native install"
+        info "  docker restart <container>          # Docker"
+    elif ! command -v systemctl >/dev/null 2>&1; then
+        warn "systemctl not available — skipping automatic dashboard restart."
+        warn "Restart the dashboard container / process manually to apply plugins."
     else
-        success "Wazuh Dashboard is healthy."
+        info "Restarting wazuh-dashboard (once, after all features installed) …"
+        _sudo systemctl restart wazuh-dashboard
+
+        DASH_OK=0
+        for i in $(seq 1 12); do
+            HTTP_CODE=$(curl -sk -o /dev/null -w "%{http_code}" https://localhost/ 2>/dev/null || true)
+            if [ "$HTTP_CODE" = "302" ] || [ "$HTTP_CODE" = "200" ]; then
+                DASH_OK=1
+                break
+            fi
+            info "  Dashboard not yet up (attempt $i/12) — waiting 5 s …"
+            sleep 5
+        done
+
+        if [ "$DASH_OK" -ne 1 ]; then
+            warn "Dashboard did not come back up. Check logs:"
+            warn "  sudo journalctl -u wazuh-dashboard -n 50"
+        else
+            success "Wazuh Dashboard is healthy."
+        fi
     fi
 fi
 
@@ -812,7 +967,7 @@ echo "────────────────────────�
 echo "  SERVICE STATUS"
 echo "────────────────────────────────────────────────────────────"
 for SVC in wazuh-manager wazuh-indexer wazuh-dashboard mcp-server mcp-llm-gateway; do
-    if systemctl is-active --quiet "$SVC" 2>/dev/null; then
+    if command -v systemctl >/dev/null 2>&1 && systemctl is-active --quiet "$SVC" 2>/dev/null; then
         echo -e "  ${GREEN}[OK]${NC}     $SVC"
     else
         echo -e "  ${YELLOW}[--]${NC}     $SVC (not running or not installed)"
