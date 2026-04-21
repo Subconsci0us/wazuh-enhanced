@@ -192,7 +192,174 @@ These are disabled optional services — not a problem:
 
 ---
 
+## Incident — 2026-04-09: Wazuh Manager Daemon Failure + Recovery (Recurrence)
+
+### Symptom
+Same error as the 2026-04-08 incident. Dashboard health check reported:
+
+1. **Error 3002**: `Request failed with status code 500` (Check API Connection)
+2. **Error 3099**: `Some Wazuh daemons are not ready yet in node "node01" (wazuh-modulesd->stopped, wazuh-analysisd->stopped, wazuh-execd->stopped, wazuh-db->stopped, wazuh-remoted->stopped)`
+
+### Root Cause
+`wazuh-manager.service` failed again with `Result: timeout` at 11:39:50 PKT. The systemd start timed out while launching daemons, but orphaned `wazuh-apid` processes (PIDs 2306, 2307, 2308, 2311, 2314) stayed alive with their PID files in `/var/ossec/var/run/`. All other daemons were down.
+
+Root cause is the same as before: the manager starts before all dependencies (likely OpenSearch/indexer) are fully ready, causing the start to time out. This is a known boot-ordering issue.
+
+### Recovery Steps
+
+```bash
+# Step 1: Confirm manager is in failed state
+systemctl status wazuh-manager
+/var/ossec/bin/wazuh-control status
+
+# Step 2: Kill orphaned wazuh-apid processes (check PIDs from PID files or wazuh-control status)
+kill -9 <apid_pids>
+
+# Step 3: Clean up stale PID/lock/start files
+rm -f /var/ossec/var/run/*.pid /var/ossec/var/run/*.lock /var/ossec/var/run/*.start
+
+# Step 4: Reset failed state and start the manager
+systemctl reset-failed wazuh-manager
+systemctl start wazuh-manager
+sleep 15
+
+# Step 5: Verify daemons are up
+/var/ossec/bin/wazuh-control status
+```
+
+### Post-Recovery State
+All critical daemons running:
+`wazuh-analysisd`, `wazuh-execd`, `wazuh-db`, `wazuh-remoted`, `wazuh-logcollector`, `wazuh-syscheckd`, `wazuh-modulesd`, `wazuh-monitord`, `wazuh-authd`, `wazuh-apid`
+
+API test confirmed working:
+```bash
+TOKEN=$(curl -k -s -u wazuh-wui:"v86bPF+u+2nph5LxghIFWivBr87qPgJL" \
+  https://localhost:55000/security/user/authenticate \
+  | python3 -c "import sys,json; print(json.load(sys.stdin)['data']['token'])")
+curl -k -s -H "Authorization: Bearer $TOKEN" https://localhost:55000/
+# → {"data":{"title":"Wazuh API REST","api_version":"4.14.3",...}}
+```
+
+### Recurring Pattern — Recommended Permanent Fix
+This is the **second time** this exact failure has occurred. The manager times out on boot because it starts before OpenSearch/indexer is ready. To prevent future recurrences, add `wazuh-indexer.service` to the manager's unit dependencies:
+
+```bash
+# Add ordering dependency to the systemd unit
+systemctl edit wazuh-manager
+```
+Add:
+```ini
+[Unit]
+After=wazuh-indexer.service
+Requires=wazuh-indexer.service
+```
+Then: `systemctl daemon-reload`
+
+This was noted as a recommendation after the first incident but not yet applied.
+
+---
+
 ## TO DO (future enhancements)
-- Create OpenSearch saved visualizations for PECA sections (bar chart by peca section, timeline, etc.)
-- Create a full dashboard tab with pre-built visualizations (requires creating saved objects in OpenSearch)
+- ~~Create OpenSearch saved visualizations for PECA sections (bar chart by peca section, timeline, etc.)~~ **DONE — 2026-04-09**
+- ~~Create a full dashboard tab with pre-built visualizations (requires creating saved objects in OpenSearch)~~ **DONE — 2026-04-09**
 - Consider mapping PECA sections to dedicated rule fields (requires Wazuh rules engine modification)
+
+---
+
+## Session 3 — 2026-04-09: OpenSearch Visualizations + Dashboard
+
+### Goal
+Create saved visualizations and a full dashboard for PECA compliance in OpenSearch Dashboards, accessible from the Dashboards app.
+
+### Approach
+Saved objects written directly to `.kibana_1` via the OpenSearch API using admin certs (same approach used by Wazuh for built-in content). No OSD API auth needed this way.
+
+Index pattern used: `wazuh-alerts-*`  
+PECA filter embedded in every visualization's `searchSourceJSON`: `rule.groups: peca`
+
+### Visualizations Created
+
+| ID | Title | Type | Description |
+|----|-------|------|-------------|
+| `peca-alerts-timeline` | PECA Alerts Over Time | Line chart | Date histogram of all PECA alerts on `@timestamp` (auto interval) |
+| `peca-alerts-by-section` | PECA Alerts by Section | Horizontal bar | Filters aggregation — one bucket per PECA section (peca_3 through peca_37) |
+| `peca-alerts-by-level` | PECA Alerts by Severity Level | Donut pie | Terms agg on `rule.level` |
+| `peca-top-rules` | PECA Top Rules Fired | Data table | Terms on `rule.id` + `rule.description` sub-bucket, sorted by count |
+| `peca-alerts-by-agent` | PECA Alerts by Agent | Vertical bar | Terms agg on `agent.name` |
+
+### Dashboard Created
+
+| ID | Title |
+|----|-------|
+| `peca-compliance-dashboard` | PECA 2016 Compliance |
+
+**Layout:**
+- Row 1 (full width): PECA Alerts Over Time (timeline)
+- Row 2 (split): Alerts by Section (left) + Alerts by Severity Level (right)
+- Row 3 (split): Top Rules Fired (left, wider) + Alerts by Agent (right)
+
+### How to Access
+- Open Wazuh Dashboard: `https://localhost/`
+- Go to **Dashboards** in the left nav (OpenSearch Dashboards section, not Wazuh modules)
+- Search for **"PECA"** — dashboard appears as "PECA 2016 Compliance"
+
+Or direct URL: `https://localhost/app/dashboards#/view/peca-compliance-dashboard`
+
+### Script
+Creation script saved at: `peca-compliance/create_peca_visualizations.py`  
+Re-run it any time to recreate the saved objects (safe to re-run — uses PUT, so it will overwrite existing).
+
+### State at End of Session
+- 5 visualizations + 1 dashboard created and verified in `.kibana_1`
+- 15 existing PECA alerts in index (all `peca_20` / rule 100103 — malicious code / rootcheck hits)
+
+---
+
+## Session 3 (continued) — 2026-04-09: PECA Dashboard Tab in Wazuh Module
+
+### Goal
+Add a **Dashboard** tab to the PECA module page in the Wazuh UI (same as GDPR, PCI DSS, HIPAA, NIST, TSC which have Dashboard + Events tabs).
+
+### Approach
+Patched `target/public/wazuh.chunk.2.js` using the same inline `DashboardByRenderer` + `savedVis` pattern used by all other compliance modules. Visualizations are defined inline (not by reference to saved OpenSearch objects) so they respect the module's DataSource filters and the search bar date range.
+
+### Bundle Changes (`wazuh.chunk.2.js` — 1 patch)
+
+Inserted ~11 KB of code immediately before the `peca:{...}` module config entry:
+
+| Added | Description |
+|-------|-------------|
+| `peca_dashboard_plugins` / `peca_dashboard_DashboardByRenderer` | Plugin handle + renderer ref (same as `gdpr_dashboards_dashboard_*`) |
+| `peca_dashboard_extends()` | Extends helper (boilerplate) |
+| `getVSPecaAlertsOverTime(indexPatternId)` | Line chart — date_histogram on `timestamp` |
+| `getVSPecaBySection(indexPatternId)` | Horizontal bar — filters agg, one bucket per PECA section (peca_3 … peca_37) |
+| `getVSPecaByLevel(indexPatternId)` | Donut — terms on `rule.level` |
+| `getVSPecaTopRules(indexPatternId)` | Bar chart — terms on `rule.id` |
+| `getVSPecaByAgent(indexPatternId)` | Donut — terms on `agent.name` |
+| `peca_dashboard_getDashboardPanels(indexPatternId, isPinnedAgent)` | Overview layout (5 panels) + agent layout (3 panels) |
+| `DashboardPECAComponent` | React component (mirrors `DashboardGDPRComponent`) |
+| `DashboardPECA` | Wrapped with `withErrorBoundary` via `redux.compose` |
+
+Changed module config:
+- `init:"events"` → `init:"dashboard"`
+- `tabs:` now has `{id:"dashboard",name:"Dashboard",buttons:[ButtonExploreAgent,ButtonModuleGenerateReport],component:DashboardPECA}` as the first tab, followed by the existing `renderDiscoverTab` (Events tab)
+
+### Dashboard Layout
+
+**Overview (no agent pinned):**
+- Row 1 full-width: Alerts Over Time
+- Row 2 split 50/50: Alerts by Section | Alerts by Severity
+- Row 3 split 32/16: Top Rules | Alerts by Agent
+
+**Agent view (agent pinned):**
+- Row 1 split 50/50: Top Rules | Alerts by Severity
+- Row 2 full-width: Alerts Over Time
+
+### Scripts
+- `peca-compliance/patch_peca_dashboard.py` — re-runnable patch script
+- Backups: `wazuh-custom/backups/wazuh.chunk.2.js.pre-peca-dashboard.bak` (before), `.with-peca-dashboard.bak` (after)
+
+### How to Access
+Wazuh Dashboard → left sidebar → **Modules** → Security operations → **PECA**
+- First tab: **Dashboard** (5 inline visualizations)
+- Second tab: **Events** (discover/alert table)

@@ -410,3 +410,103 @@ Edit `/etc/mcp-llm-gateway/mcp-llm-gateway.env`, change `GEMINI_MODEL`, then:
 ```bash
 systemctl restart mcp-llm-gateway
 ```
+
+---
+
+## Issue — wazuh-manager "API is down" after restart (2026-04-12)
+
+### Symptom
+
+Wazuh Dashboard showed **"API is down"** for the default API connection. All wazuh-manager processes were stopped (`wazuh-apid not running`, etc.). `systemctl status wazuh-manager` showed:
+
+```
+Active: failed (Result: timeout)
+wazuh-manager.service: start operation timed out. Terminating.
+```
+
+### Root cause
+
+The `wazuh-manager.service` unit file has `TimeoutSec=45`. The startup sequence (loading modulesd, analysisd, db, apid, etc.) takes ~26 seconds under normal conditions but can exceed 45 seconds under VM load. systemd killed the startup mid-way, leaving all processes stopped.
+
+### Fix
+
+**1. Start the manager immediately (one-off):**
+```bash
+sudo /var/ossec/bin/wazuh-control start
+```
+
+**2. Permanently increase the systemd start timeout to 120 seconds:**
+```bash
+sudo mkdir -p /etc/systemd/system/wazuh-manager.service.d
+sudo tee /etc/systemd/system/wazuh-manager.service.d/timeout.conf <<'EOF'
+[Service]
+TimeoutStartSec=120
+EOF
+sudo systemctl daemon-reload
+```
+
+The drop-in file at `/etc/systemd/system/wazuh-manager.service.d/timeout.conf` persists across package upgrades and reboots.
+
+### Verification
+
+```bash
+sudo /var/ossec/bin/wazuh-control status   # wazuh-apid should show "is running"
+curl -sk -u "wazuh-wui:<password>" \
+     https://localhost:55000/security/user/authenticate -X GET
+# → {"data":{"token":"..."},"error":0}
+```
+
+API credentials (`wazuh-wui` user + password) are in `/usr/share/wazuh-dashboard/data/wazuh/config/wazuh.yml`.
+
+### Notes
+
+- `wazuh-clusterd`, `wazuh-maild`, `wazuh-agentlessd`, `wazuh-dbd`, `wazuh-csyslogd`, `wazuh-integratord` not running is **normal** in a single-node setup — these are optional services.
+- If the manager fails to start again after a reboot, run `sudo /var/ossec/bin/wazuh-control start` manually; the timeout fix prevents future occurrences.
+
+---
+
+## Session: Install Script Feature Flags — 2026-04-13
+
+### What was changed
+
+Rewrote `setup.sh` from a single linear script (818 lines) to a function-based script with feature flag support (957 lines). No new folder — this is a modification to the root-level install script.
+
+### Feature registry
+
+Defined in `ALL_FEATURES` array (canonical install order):
+
+| Feature | Function | What it does |
+|---|---|---|
+| `pecaRules` | `install_pecaRules()` | Steps B — copy XML rules, check/fix ID conflicts, restart manager |
+| `aiAssistant` | `install_aiAssistant()` | Steps C–G — MCP server, gateway, dashboard plugins, ML Commons, model+agent |
+| `networkGraph` | `install_networkGraph()` | Calls `networkGraph/install.sh` |
+| `nlqSearch` | `install_nlqSearch()` | Calls `nlqSearch/install.sh` |
+| `complianceView` | `install_complianceView()` | Steps I — bundle patching, recompression |
+
+### New flags
+
+```
+sudo bash setup.sh                              # all features (default, unchanged)
+sudo bash setup.sh --only networkGraph nlqSearch
+sudo bash setup.sh --skip complianceView
+sudo bash setup.sh --list
+sudo bash setup.sh --help
+```
+
+`--only` and `--skip` are mutually exclusive. Unknown feature names cause an immediate fatal error. `--peca` (legacy flag) maps to `--only complianceView`.
+
+### Error handling changes
+
+- Old: `set -euo pipefail` + `error()` calling `exit 1` — any failure aborted the whole script.
+- New: `set -uo pipefail` (no `-e`) + `error()` prints without exiting + `fatal()` exits (used only in `shared_setup` and arg parsing). Each feature function uses `|| return 1` on critical commands. Main loop catches failures and continues.
+- Summary table printed at end: `[OK]` / `[FAILED]` / `[SKIP]` per feature. Exit code 1 if any feature failed.
+
+### Dashboard restart
+
+Previously: restarted wazuh-dashboard after Step E (aiAssistant), Step H2 (nlqSearch), and Step I (complianceView) — three restarts in a full install.
+
+Now: single restart after all features complete.
+
+### README.md
+
+Added "Feature Flags" subsection under "How to Run setup.sh" with usage examples, feature table, error handling notes, and single-restart behaviour.
