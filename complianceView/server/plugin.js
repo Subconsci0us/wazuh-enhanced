@@ -1,4 +1,5 @@
 'use strict';
+require('./load_env');
 
 /**
  * server/plugin.js — ComplianceView server-side lifecycle class.

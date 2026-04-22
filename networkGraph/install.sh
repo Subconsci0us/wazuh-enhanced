@@ -81,10 +81,31 @@ cp "${BUILD_DIR}/package.json"               "${INSTALL_DIR}/"
 # Server-side (pre-compiled Node.js)
 cp "${BUILD_DIR}/server/index.js"            "${INSTALL_DIR}/server/"
 cp "${BUILD_DIR}/server/plugin.js"           "${INSTALL_DIR}/server/plugin.js"
+cp "${BUILD_DIR}/server/load_env.js"         "${INSTALL_DIR}/server/load_env.js"
 cp "${BUILD_DIR}/server/routes/index.js"     "${INSTALL_DIR}/server/routes/"
 
 # Public bundle (built by webpack)
 cp "${BUNDLE}" "${INSTALL_DIR}/target/public/"
+
+# Write .env — credentials are read at runtime via load_env.js
+ENV_FILE="${INSTALL_DIR}/server/.env"
+if [ ! -f "${ENV_FILE}" ]; then
+  cat > "${ENV_FILE}" <<EOF
+WAZUH_API_HOST=localhost
+WAZUH_API_PORT=55000
+WAZUH_API_USER=wazuh-wui
+WAZUH_API_PASSWORD=${WAZUH_API_PASSWORD:-}
+EOF
+  if [ -z "${WAZUH_API_PASSWORD:-}" ]; then
+    echo "      WARNING: WAZUH_API_PASSWORD not set."
+    echo "      Edit ${ENV_FILE} and set WAZUH_API_PASSWORD, then restart wazuh-dashboard."
+    echo "      Password is in wazuh-passwords.txt (wazuh-wui entry)."
+  else
+    echo "      Env file written to ${ENV_FILE}"
+  fi
+else
+  echo "      ${ENV_FILE} already exists — skipping."
+fi
 
 # Fix ownership so the wazuh-dashboard service can read the files
 if id wazuh-dashboard >/dev/null 2>&1; then

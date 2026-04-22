@@ -77,9 +77,30 @@ cp "${BUILD_DIR}/package.json"               "${INSTALL_DIR}/"
 
 cp "${BUILD_DIR}/server/index.js"            "${INSTALL_DIR}/server/"
 cp "${BUILD_DIR}/server/plugin.js"           "${INSTALL_DIR}/server/"
+cp "${BUILD_DIR}/server/load_env.js"         "${INSTALL_DIR}/server/load_env.js"
 cp "${BUILD_DIR}/server/routes/index.js"     "${INSTALL_DIR}/server/routes/"
 
 cp "${BUNDLE}" "${INSTALL_DIR}/target/public/"
+
+# Write .env — credentials are read at runtime via load_env.js
+ENV_FILE="${INSTALL_DIR}/server/.env"
+if [ ! -f "${ENV_FILE}" ]; then
+  cat > "${ENV_FILE}" <<EOF
+OS_HOST=localhost
+OS_PORT=9200
+OS_USER=admin
+OS_PASSWORD=${OS_PASSWORD:-}
+EOF
+  if [ -z "${OS_PASSWORD:-}" ]; then
+    echo "      WARNING: OS_PASSWORD not set."
+    echo "      Edit ${ENV_FILE} and set OS_PASSWORD, then restart wazuh-dashboard."
+    echo "      Password is in wazuh-passwords.txt (admin entry)."
+  else
+    echo "      Env file written to ${ENV_FILE}"
+  fi
+else
+  echo "      ${ENV_FILE} already exists — skipping."
+fi
 
 if id wazuh-dashboard >/dev/null 2>&1; then
   chown -R wazuh-dashboard:wazuh-dashboard "${INSTALL_DIR}"

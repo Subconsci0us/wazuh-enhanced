@@ -178,6 +178,87 @@ The wazuh-dashboard service is restarted **once** at the end of all feature inst
 
 > **The script is idempotent** for most steps — re-running it will skip steps that are already done (e.g., existing Wazuh install, existing service accounts).
 
+### Running setup.sh — AI Assistant walkthrough
+
+The `aiAssistant` feature is the most involved because it requires external credentials and pauses twice for you to fill them in. Everything else is fully automated.
+
+#### What to have ready before you run
+
+| Credential | Where to get it |
+|------------|-----------------|
+| Wazuh Indexer admin password | `tar -xOf wazuh-install-files.tar wazuh-passwords.txt` — `admin` user password |
+| LLM API key | Gemini: [aistudio.google.com](https://aistudio.google.com) (free tier) · OpenAI: platform.openai.com · Bedrock: AWS IAM |
+| A gateway secret | Any strong string you invent (e.g. output of `openssl rand -hex 32`) — used to authenticate calls from OpenSearch to the gateway |
+
+#### What happens when you run `sudo bash setup.sh`
+
+1. **Wazuh install check** — detects existing installation, skips the installer if Wazuh is already running.
+2. **PECA rules** — copies `peca_rules.xml` to `/var/ossec/etc/rules/`, sets correct ownership, restarts the manager.
+3. **MCP Server setup** — creates a Python venv, installs `opensearch-mcp-server-py`, writes the service file.
+
+   **Pause 1** — the script opens `/etc/mcp-server/mcp-server.env` for you to fill in:
+   ```
+   OPENSEARCH_URL=https://127.0.0.1:9200
+   OPENSEARCH_USERNAME=admin
+   OPENSEARCH_PASSWORD=<password from wazuh-passwords.txt>
+   OPENSEARCH_SSL_VERIFY=false
+   ```
+   Save and press Enter to continue.
+
+4. **MCP-LLM Gateway setup** — creates a second Python venv, installs pinned LangChain + FastAPI dependencies.
+
+   **Pause 2** — the script opens `/etc/mcp-llm-gateway/mcp-llm-gateway.env` for you to fill in:
+   ```
+   # Choose one provider:
+   LLM_PROVIDER=gemini
+   GEMINI_API_KEY=<your-key>
+   GEMINI_MODEL=gemini-2.5-flash
+
+   # Internal authentication — any secret string you choose:
+   GATEWAY_API_KEY=<your-gateway-secret>
+
+   # MCP Server SSE endpoint (same host, default port):
+   MCP_SSE_URL=http://127.0.0.1:9900/sse
+   ```
+   Save and press Enter to continue.
+
+5. **Dashboard plugins** — downloads the official OpenSearch Dashboards tarball for your OSD version, extracts `assistantDashboards` and `mlCommonsDashboards` plugins, installs them.
+6. **ML Commons settings** — prompts for the gateway IP (just press Enter to use the machine's own IP), then applies three cluster settings to the Wazuh Indexer.
+7. **Model + agent registration** — prompts for the `GATEWAY_API_KEY` you set above, registers a remote ML model pointing at the gateway, deploys it, registers a conversational agent, and sets it as the root chat agent.
+8. **Dashboard restart** — restarts `wazuh-dashboard` once to activate all plugins.
+
+#### How the API key is handled
+
+Your LLM API key is stored only in `/etc/mcp-llm-gateway/mcp-llm-gateway.env` on the server, readable only by the `mcpgateway` system user (mode 640, `root:mcpgateway`). It never touches the dashboard or the browser.
+
+The call chain at runtime is:
+
+```
+Browser → Wazuh Dashboard → OpenSearch ML Commons
+    → POST /analyze  (X-API-Key: <GATEWAY_API_KEY>)   ← your internal secret, not your LLM key
+    → MCP-LLM Gateway  →  LLM Provider API  (uses LLM key, server-side only)
+```
+
+The `GATEWAY_API_KEY` you register in ML Commons is only the internal secret between OpenSearch and the gateway — not your LLM provider key. The LLM key is never sent to the browser or stored in OpenSearch.
+
+#### Verify the AI assistant is working
+
+```bash
+# Check all three components are healthy
+curl -s http://127.0.0.1:9912/health | python3 -m json.tool
+
+# Expected:
+# {
+#   "summary": "All components operational.",
+#   "status": { "gateway": "ok", "llm": "ok", "mcp": "ok" },
+#   "details": { "mcp_tools_count": 11 },
+#   "provider": "gemini",
+#   "model": "gemini-2.5-flash"
+# }
+```
+
+Then open `https://<host>/` in a browser, log in, and click the **chat icon** in the top-right corner.
+
 ---
 
 ## Post-Setup Configuration
@@ -338,6 +419,35 @@ curl -s http://127.0.0.1:9912/health
 
 ---
 
+## Network Graph Plugin
+
+The **Network Graph** plugin (`networkGraph/`) adds an interactive D3 graph to the Wazuh Dashboard showing agent connectivity and recent alert relationships.
+
+### Install Network Graph
+
+```bash
+sudo WAZUH_API_PASSWORD=<wazuh-wui-password> bash networkGraph/install.sh
+```
+
+Or via the main installer:
+
+```bash
+sudo bash setup.sh --only networkGraph
+```
+
+Then set the Wazuh API password if not passed at install time:
+```bash
+sudo nano /usr/share/wazuh-dashboard/plugins/networkGraph/server/.env
+# Set WAZUH_API_PASSWORD=<wazuh-wui password from wazuh-install-files.tar>
+sudo systemctl restart wazuh-dashboard
+```
+
+Navigate to: `https://<host>/app/networkGraph`
+
+See `networkGraph/README.md` for full documentation.
+
+---
+
 ## NLQ Search Plugin
 
 The **NLQ Search** plugin (`nlqSearch/`) adds a dedicated search page to the Wazuh Dashboard sidebar where analysts can query alerts in plain English.
@@ -391,6 +501,8 @@ sudo nano /usr/share/wazuh-dashboard/plugins/nlqSearch/server/.env
 sudo systemctl restart wazuh-dashboard
 ```
 
+> The password is in `wazuh-passwords.txt` inside `wazuh-install-files.tar` — look for the `admin` user entry.
+
 Navigate to: `https://<host>/app/nlqSearch`
 
 ### Example queries
@@ -421,13 +533,20 @@ The **Compliance View** plugin (`complianceView/`) adds a standalone page to the
 
 ```bash
 cd complianceView
-sudo bash install.sh
+sudo OS_PASSWORD=<admin-password> bash install.sh
 ```
 
 Or via the main installer:
 
 ```bash
 sudo bash setup.sh --only complianceView
+```
+
+Then set the Wazuh Indexer password if not passed at install time:
+```bash
+sudo nano /usr/share/wazuh-dashboard/plugins/complianceView/server/.env
+# Set OS_PASSWORD=<password from wazuh-install-files.tar>
+sudo systemctl restart wazuh-dashboard
 ```
 
 Navigate to: `https://<host>/app/complianceView`
@@ -508,7 +627,7 @@ sudo docker exec -u root "$MANAGER" bash \
 sudo docker restart "$DASH"
 ```
 
-> **Why `--skip aiAssistant`?** The `aiAssistant` feature requires LLM API keys and interactive prompts. Test it on a real host with `sudo bash setup.sh --only aiAssistant`.
+> **Why `--skip aiAssistant`?** The `aiAssistant` feature requires LLM API keys, interactive prompts, and systemd services — none of which map cleanly to the Docker multi-container topology. Test it on a native host or AWS with `sudo bash setup.sh --only aiAssistant`.
 
 ### Step 4 — Verify
 

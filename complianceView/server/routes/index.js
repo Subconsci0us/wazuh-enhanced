@@ -25,10 +25,10 @@ const { schema } = require('@osd/config-schema');
 
 /* ── OpenSearch connection ──────────────────────────────────────────────────── */
 
-const OS_HOST     = 'localhost';
-const OS_PORT     = 9200;
-const OS_USER     = 'admin';
-const OS_PASSWORD = 'lO.5jGDicEdmbH9kt9So1DYeFqkl6k6s';
+const OS_HOST     = process.env.OS_HOST     || 'localhost';
+const OS_PORT     = parseInt(process.env.OS_PORT || '9200', 10);
+const OS_USER     = process.env.OS_USER     || 'admin';
+const OS_PASSWORD = process.env.OS_PASSWORD || 'lO.5jGDicEdmbH9kt9So1DYeFqkl6k6s';
 const OS_INDEX    = 'wazuh-alerts-*';
 
 const osAgent = new https.Agent({ rejectUnauthorized: false });

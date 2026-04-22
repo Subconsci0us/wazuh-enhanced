@@ -279,12 +279,84 @@ All routes respond with non-404, confirming server-side plugins are loaded.
 
 ---
 
+## PHASE 5 — End-to-End Plugin Verification (2026-04-22)
+
+Following Phase 4, the running Docker stack was used to verify full plugin functionality (not just load). This exposed two further issues with hardcoded credentials.
+
+### Issue 9 — networkGraph and complianceView return HTTP 500 in Docker
+
+**Error:**
+- `GET /api/network_graph/agents` → `{"message":"connect ECONNREFUSED 127.0.0.1:55000"}`
+- `GET /api/compliance_view/summary` → `{"message":"An internal server error occurred."}`
+
+**Root cause:** Both plugins had credentials hardcoded directly in `server/routes/index.js` — the developer's native Wazuh install passwords. Docker uses different default credentials (`MyS3cr37P450r.*-` for the Wazuh API, `SecretPassword` for the indexer). Neither plugin read from a `.env` file (unlike `nlqSearch` which already had this pattern).
+
+**Fix:** Applied the same `load_env.js` pattern used by `nlqSearch` to both plugins:
+1. Changed hardcoded constants to `process.env.X || 'fallback'` in both `routes/index.js` — fallback preserves native install compatibility
+2. Added `server/load_env.js` to both plugins (reads `.env` into `process.env` at startup)
+3. Patched both `server/plugin.js` to `require('./load_env')` at the top
+4. Updated both `install.sh` scripts to copy `load_env.js` and write a `.env` file at install time (warns if password env vars not set)
+
+---
+
+### Issue 10 — Docker cross-container hostname: `localhost` not valid
+
+**Error:** After applying Issue 9 fix with `WAZUH_API_HOST=localhost` and `OS_HOST=localhost`, networkGraph still returned `ECONNREFUSED 127.0.0.1:55000`. The dashboard container's `localhost` is itself — not the manager or indexer containers.
+
+**Root cause:** In Docker Compose, each container has its own network namespace. The manager and indexer are separate containers reachable only via their internal DNS names, not `localhost`.
+
+**Fix:** Docker Compose sets up internal DNS automatically using service names. Confirmed via `/etc/hosts` inside the dashboard container:
+```
+172.18.0.3      wazuh.manager
+172.18.0.4      wazuh.indexer
+```
+
+Wrote Docker-specific `.env` files directly into the running containers:
+```bash
+# networkGraph
+WAZUH_API_HOST=wazuh.manager
+WAZUH_API_PASSWORD=MyS3cr37P450r.*-
+
+# complianceView
+OS_HOST=wazuh.indexer
+OS_PASSWORD=SecretPassword
+```
+
+**Note:** On a native install (AWS or local), `localhost` is correct — all Wazuh components run on the same machine. The Docker multi-container topology is the only case where this differs.
+
+**Result after fix:**
+```
+GET /api/network_graph/agents  → 200  (returns agent list with 1 agent: wazuh.manager)
+GET /api/compliance_view/summary → 200  (returns real alert counts from indexer)
+```
+
+---
+
+### aiAssistant — deferred to AWS (not tested in Docker)
+
+The `aiAssistant` feature was not tested in Docker for the following reasons:
+1. **Split topology** — MCP Server and MCP-LLM Gateway are systemd services that must run on the host. The dashboard plugins must be in the Docker container. This hybrid setup doesn't represent a real deployment.
+2. **Interactive prompts** — two `read -r` prompts and two `read` for IP/API key require a terminal session; can be bypassed but adds complexity with no meaningful benefit.
+3. **Clean test environment** — the native Linux Mint install (same Ubuntu base as typical AWS EC2) provides a better test environment without the Docker topology complexity.
+
+**Decision:** Test `aiAssistant` on AWS directly. The other 5 features are fully verified.
+
+---
+
 ## Summary of All Files Modified
 
 | File | Changes |
 |------|---------|
 | `setup.sh` | Added `--no-restart`, `_sudo()`, `ensure_node()`, fixed `shared_setup()`, fixed `install_pecaRules()` (systemctl + ownership), fixed `install_complianceView()` (portable brotli/gzip), propagated `--no-restart` to sub-scripts |
 | `complianceView/patch_bundles.py` | Added fallback apps-list anchor (`,about,ITHygiene].sort(`) for fresh Wazuh 4.14.3 installations |
+| `networkGraph/server/routes/index.js` | Credentials changed from hardcoded to `process.env.X \|\| fallback` |
+| `networkGraph/server/load_env.js` | New file — loads `.env` into `process.env` at plugin startup |
+| `networkGraph/server/plugin.js` | Added `require('./load_env')` at top |
+| `networkGraph/install.sh` | Now copies `load_env.js` and writes `.env` at install time |
+| `complianceView/server/routes/index.js` | Credentials changed from hardcoded to `process.env.X \|\| fallback` |
+| `complianceView/server/load_env.js` | New file — loads `.env` into `process.env` at plugin startup |
+| `complianceView/server/plugin.js` | Added `require('./load_env')` at top |
+| `complianceView/install.sh` | Now copies `load_env.js` and writes `.env` at install time |
 
 ---
 

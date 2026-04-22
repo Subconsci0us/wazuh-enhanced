@@ -30,11 +30,11 @@ const { schema }     = require('@osd/config-schema');
      /usr/share/wazuh-dashboard/data/wazuh/config/wazuh.yml
    ───────────────────────────────────────────────────────────────────────────── */
 
-const WAZUH_API_HOST     = 'localhost';   // Wazuh manager REST API hostname
-const WAZUH_API_PORT     = 55000;         // Default Wazuh REST API port
-const WAZUH_API_USER     = 'wazuh-wui';   // Built-in read-only API user
-const WAZUH_API_PASSWORD = 'v86bPF+u+2nph5LxghIFWivBr87qPgJL';
-const WAZUH_API_RUN_AS   = true;          // Sends run_as: false header (required for wazuh-wui)
+const WAZUH_API_HOST     = process.env.WAZUH_API_HOST     || 'localhost';
+const WAZUH_API_PORT     = parseInt(process.env.WAZUH_API_PORT || '55000', 10);
+const WAZUH_API_USER     = process.env.WAZUH_API_USER     || 'wazuh-wui';
+const WAZUH_API_PASSWORD = process.env.WAZUH_API_PASSWORD || 'v86bPF+u+2nph5LxghIFWivBr87qPgJL';
+const WAZUH_API_RUN_AS   = true;
 
 // The Wazuh manager uses a self-signed certificate.
 // rejectUnauthorized: false is safe here because the connection is loopback-only.
