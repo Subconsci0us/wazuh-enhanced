@@ -13,10 +13,19 @@ Patches applied:
     6. Module tabs        — add peca + compliance-overview modules
 
   wazuh.plugin.js:
-    7. compliance_overview_app object definition (order 407)
-    8. Apps list          — insert compliance_overview_app after peca_app
+    7a. peca app definition (order 406) — sidebar navigation entry for PECA module
+    7b. compliance_overview_app definition (order 407)
+    8.  Apps list — insert peca + compliance_overview_app (handles fresh install,
+        partial-patch, and re-run without duplicating)
 
 All patches are idempotent: already-applied patches are detected and skipped.
+
+Fix history:
+  2026-04-22 — AWS deployment revealed peca_app was never added to wazuh.plugin.js.
+  patch_peca_dashboard.py only patched wazuh.chunk.2.js (dashboard tab content) but
+  never defined the sidebar navigation const `peca` at order:406. The old apps-list
+  logic here assumed `peca_app` already existed (it never did) so fell back to
+  inserting only compliance_overview_app. Both steps now handled correctly below.
 """
 import sys
 
@@ -197,6 +206,52 @@ def patch_chunk2():
 # PLUGIN.JS PATCHES
 # ══════════════════════════════════════════════════════════════════════════════
 
+# ── 7a. peca app definition (order:406) ───────────────────────────────────────
+# Mirrors the TSC entry (order:405) exactly — same redirectTo pattern, same
+# showInOverviewApp/showInAgentMenu flags, points to tab=peca.
+# This was the missing piece: patch_peca_dashboard.py only patched chunk.2.js
+# (dashboard content) but never added the sidebar navigation entry here.
+PECA_APP = (
+    'const peca={'
+    'category:"wz-category-security-operations",'
+    'id:"peca",'
+    'title:_osd_i18n__WEBPACK_IMPORTED_MODULE_0__["i18n"].translate('
+        '"wz-app-peca-title",{defaultMessage:"PECA"}),'
+    'breadcrumbLabel:_osd_i18n__WEBPACK_IMPORTED_MODULE_0__["i18n"].translate('
+        '"wz-app-peca-breadcrumbLabel",{defaultMessage:"PECA"}),'
+    'description:_osd_i18n__WEBPACK_IMPORTED_MODULE_0__["i18n"].translate('
+        '"wz-app-peca-description",'
+        '{defaultMessage:"Prevention of Electronic Crimes Act 2016 — '
+        "Pakistan's cybercrime law covering unauthorized access, data theft, "
+        'and cyber terrorism."}),'
+    'euiIconType:"packetbeatApp",'
+    'order:406,'
+    'showInOverviewApp:true,'
+    'showInAgentMenu:true,'
+    'redirectTo:()=>{'
+        'var _store$getState27,_store$getState28;'
+        'return`/overview/?tab=peca&tabView=dashboard${'
+            '(_store$getState27=_redux_store__WEBPACK_IMPORTED_MODULE_1__["a"].getState())'
+            '!==null&&_store$getState27!==void 0&&'
+            '(_store$getState27=_store$getState27.appStateReducers)'
+            '!==null&&_store$getState27!==void 0&&'
+            '(_store$getState27=_store$getState27.currentAgentData)'
+            '!==null&&_store$getState27!==void 0&&'
+            '_store$getState27.id'
+            '?`&agentId=${'
+                '(_store$getState28=_redux_store__WEBPACK_IMPORTED_MODULE_1__["a"].getState())'
+                '===null||_store$getState28===void 0||'
+                '(_store$getState28=_store$getState28.appStateReducers)'
+                '===null||_store$getState28===void 0||'
+                '(_store$getState28=_store$getState28.currentAgentData)'
+                '===null||_store$getState28===void 0'
+                '?void 0:_store$getState28.id'
+            '}`:""}`}}'
+    ';'
+)
+PECA_APP_MARKER = 'const peca='
+
+# ── 7b. compliance_overview_app definition (order:407) ────────────────────────
 CO_APP = (
     'const compliance_overview_app={'
     'category:"wz-category-security-operations",'
@@ -214,27 +269,12 @@ CO_APP = (
     'showInAgentMenu:false,'
     'redirectTo:()=>`/overview/?tab=compliance-overview&tabView=dashboard`};'
 )
+CO_APP_MARKER = 'compliance_overview_app'
 
-# ── 7. compliance_overview_app definition ─────────────────────────────────────
-# Anchor: a short, unique 4-character sequence that ends the peca_app definition
-# block and immediately precedes `const docker=`.  Verified unique in plugin.js.
-# Using this short anchor avoids backtick/quote encoding issues with the long
-# state100 expression that caused previous patch attempts to fail.
-CO_APP_ANCHOR_OLD = '}`}};const docker='
-CO_APP_ANCHOR_NEW = '}`}};' + CO_APP + 'const docker='
-CO_APP_MARKER     = 'compliance_overview_app'
-
-# ── 8. Apps list ──────────────────────────────────────────────────────────────
-# Primary anchor: assumes peca_app is already in the list (native VM after
-# peca-compliance dashboard patch, or re-runs).
-APPS_LIST_OLD = ',peca_app,devTools,'
-APPS_LIST_NEW = ',peca_app,compliance_overview_app,devTools,'
-
-# Fallback anchor: the end of the apps array on a fresh Wazuh 4.14.3 install
-# where peca_app has not been added yet.  compliance_overview_app is inserted
-# before the .sort() call so the order:407 value places it correctly.
-APPS_LIST_FALLBACK_OLD = ',about,ITHygiene].sort('
-APPS_LIST_FALLBACK_NEW = ',about,ITHygiene,compliance_overview_app].sort('
+# Anchor for inserting both app defs on a fresh install (end of TSC redirectTo,
+# immediately before const docker= — verified unique in Wazuh 4.14.3 plugin.js).
+FRESH_ANCHOR_OLD = '}`}};const docker='
+FRESH_ANCHOR_NEW = '}`}};' + PECA_APP + CO_APP + 'const docker='
 
 
 def patch_plugin():
@@ -242,17 +282,66 @@ def patch_plugin():
     with open(PLUGIN, 'r', encoding='utf-8') as f:
         p = f.read()
 
-    p, _ = apply_patch_marker(p, CO_APP_ANCHOR_OLD, CO_APP_ANCHOR_NEW, CO_APP_MARKER,
-                               'compliance_overview_app definition (order 407)')
-
-    # Try the primary apps-list anchor first; fall back to the ITHygiene anchor
-    # on fresh installations that do not yet have peca_app in the list.
-    if APPS_LIST_OLD in p:
-        p, _ = apply_patch(p, APPS_LIST_OLD, APPS_LIST_NEW,
-                           'apps list (insert compliance_overview_app after peca_app)')
+    # ── Step 7a: peca app definition ──────────────────────────────────────────
+    # Three cases:
+    #   A. Fresh install (nothing patched yet): use FRESH_ANCHOR to add both
+    #      peca and compliance_overview_app in one step.
+    #   B. Old patch ran (compliance_overview_app present, peca absent):
+    #      insert peca immediately before compliance_overview_app.
+    #   C. Already fully patched (peca present): skip.
+    if PECA_APP_MARKER in p:
+        print(f'  [SKIP] already applied: peca app definition (order 406)')
+    elif CO_APP_MARKER in p:
+        # Case B: compliance_overview_app exists but peca doesn't — insert peca before it
+        p, _ = apply_patch_marker(
+            p,
+            'const compliance_overview_app=',
+            PECA_APP + 'const compliance_overview_app=',
+            PECA_APP_MARKER,
+            'peca app definition (order 406) — inserted before existing compliance_overview_app'
+        )
     else:
-        p, _ = apply_patch(p, APPS_LIST_FALLBACK_OLD, APPS_LIST_FALLBACK_NEW,
-                           'apps list fallback (insert compliance_overview_app before sort)')
+        # Case A: fresh install — add both peca and compliance_overview_app before docker
+        p, _ = apply_patch_marker(
+            p, FRESH_ANCHOR_OLD, FRESH_ANCHOR_NEW, PECA_APP_MARKER,
+            'peca + compliance_overview_app definitions (fresh install, order 406+407)'
+        )
+
+    # ── Step 7b: compliance_overview_app definition ───────────────────────────
+    # On Case A it was already added by step 7a. On Case B it was already there.
+    # This step handles any state where CO_APP_MARKER is still absent after 7a.
+    if CO_APP_MARKER not in p:
+        p, _ = apply_patch_marker(
+            p, FRESH_ANCHOR_OLD, '}`}};' + CO_APP + 'const docker=', CO_APP_MARKER,
+            'compliance_overview_app definition (order 407) — safety fallback'
+        )
+    else:
+        print(f'  [SKIP] already applied: compliance_overview_app definition (order 407)')
+
+    # ── Step 8: Apps list — peca ──────────────────────────────────────────────
+    # The array is .sort()ed by order value so insertion position is cosmetic only.
+    # Primary anchor: right after tsc (exists on all Wazuh 4.14.3 installs).
+    # Fallback: before the sort call (catches any bundle variant where tsc,devTools
+    # sequence differs).
+    if ',peca,' in p:
+        print(f'  [SKIP] already applied: peca in apps list')
+    elif ',tsc,devTools,' in p:
+        p, _ = apply_patch(p, ',tsc,devTools,', ',tsc,peca,devTools,',
+                           'apps list: insert peca after tsc')
+    else:
+        p, _ = apply_patch(p, ',about,ITHygiene].sort(', ',about,ITHygiene,peca].sort(',
+                           'apps list fallback: insert peca before sort')
+
+    # ── Step 9: Apps list — compliance_overview_app ───────────────────────────
+    if ',compliance_overview_app,' in p or ',compliance_overview_app]' in p:
+        print(f'  [SKIP] already applied: compliance_overview_app in apps list')
+    elif ',peca,devTools,' in p:
+        p, _ = apply_patch(p, ',peca,devTools,', ',peca,compliance_overview_app,devTools,',
+                           'apps list: insert compliance_overview_app after peca')
+    else:
+        p, _ = apply_patch(p, ',about,ITHygiene,peca].sort(',
+                           ',about,ITHygiene,peca,compliance_overview_app].sort(',
+                           'apps list fallback: insert compliance_overview_app after peca')
 
     with open(PLUGIN, 'w', encoding='utf-8') as f:
         f.write(p)

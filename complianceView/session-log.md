@@ -217,3 +217,211 @@ patch_bundles.py re-run against patched bundles: all 8 patches [SKIP] — idempo
 - The overlap matrix diagonal shows each framework's own total (not self-overlap). Off-diagonal cells correctly show co-occurrence counts.
 
 - If the Wazuh package is upgraded, the bundle patches will be overwritten. Re-run `setup.sh --only complianceView` to reapply. Original bundles are backed up with `.orig` suffix.
+
+---
+
+## AWS Deployment — PECA Dashboard Missing (2026-04-22)
+
+**Deployment environment:** AWS EC2 `ec2-16-170-236-3.eu-north-1.compute.amazonaws.com` (Ubuntu 24.04.4 LTS, Wazuh 4.14.3 all-in-one).
+
+### Issue Found
+
+After running the full setup on EC2, the PECA module was not appearing in the Wazuh Dashboard sidebar under Security Operations. All other modules (PCI DSS, GDPR, HIPAA, NIST, TSC, Compliance Overview) were visible. The PECA module was completely absent — no sidebar entry, no way to navigate to it.
+
+### Root Cause
+
+`patch_peca_dashboard.py` only patches `wazuh.chunk.2.js`. It correctly adds:
+- The `PECADataSource` class
+- `pecaColumns` definition
+- Dashboard visualisation functions (`getVSPecaAlertsOverTime`, etc.)
+- `DashboardPECA` component
+- The `peca:{init:"dashboard", tabs:[...]}` module config
+
+**However, it never adds the `peca` app constant to `wazuh.plugin.js`.** This constant is the sidebar navigation entry — without it the module cannot be reached from the UI regardless of what is in `chunk.2.js`.
+
+The module order in `wazuh.plugin.js` after the old `patch_bundles.py` ran was:
+
+```
+order:400 (it-hygiene)
+order:401 (pci)
+order:402 (gdpr)
+order:403 (hipaa)
+order:404 (nist)
+order:405 (tsc)
+          ← order:406 MISSING — peca was never inserted
+order:407 (compliance-overview)
+```
+
+The old apps-list logic in `patch_bundles.py` had a primary anchor `,peca_app,devTools,` (incorrect — the Wazuh native variable is not called `peca_app`, it is `peca`) and a fallback anchor `,about,ITHygiene].sort(`. Since the primary never matched on any install, only `compliance_overview_app` was ever added via the fallback. `peca` was never added.
+
+### Fix Applied
+
+**On EC2 (live fix — 2026-04-22 ~18:15 UTC):**
+
+1. Wrote `/tmp/patch_peca_plugin.py` and ran it with `sudo python3`:
+   - Inserted `const peca={category:"wz-category-security-operations", id:"peca", order:406, showInOverviewApp:true, showInAgentMenu:true, redirectTo:()=>{...tab=peca...}};` immediately before `const compliance_overview_app=` in `wazuh.plugin.js`.
+   - Inserted `,peca,` into the apps array after `tsc` (anchor: `,tsc,devTools,`).
+   - Backed up original to `wazuh.plugin.js.orig2`.
+   - Recompressed `.gz` (gzip level 9) and `.br` (brotli quality 11).
+2. Restarted `wazuh-dashboard` (`systemctl restart wazuh-dashboard`).
+
+Verification grep results:
+```
+const peca= count: 1          ✓
+,tsc,peca,devTools,            ✓
+order:404, order:405, order:406, order:407  ✓ (full sequence)
+wazuh-dashboard: active        ✓
+```
+
+**In `patch_bundles.py` (permanent fix — idempotent on all future installs):**
+
+Replaced the broken apps-list logic with a clean 4-step `patch_plugin()` that handles three install states:
+
+| State | Description | Behaviour |
+|-------|-------------|-----------|
+| A — Fresh install | Neither `peca` nor `compliance_overview_app` in plugin.js | Both added at TSC anchor (`}`}};const docker=`) in one step |
+| B — Old patch ran | `compliance_overview_app` present, `peca` absent | `peca` inserted immediately before `const compliance_overview_app=` |
+| C — Fully patched | Both `const peca=` and `compliance_overview_app` present | All steps skip (idempotent) |
+
+Apps-list steps are now independent:
+- Step 8: insert `peca` after `tsc` in apps array (anchor: `,tsc,devTools,`; fallback: before `].sort(`)
+- Step 9: insert `compliance_overview_app` after `peca` in apps array
+
+The old erroneous `APPS_LIST_OLD = ',peca_app,devTools,'` anchor (which matched nothing) and `APPS_LIST_FALLBACK` (which added only `compliance_overview_app`) have been removed and replaced.
+
+**File changed:** `wazuh-fyp-repo/complianceView/patch_bundles.py` — `patch_plugin()` function and module-level constants for plugin.js patches.
+
+### Verification (post-fix)
+
+```
+# On EC2
+grep -c 'const peca='  wazuh.plugin.js   → 1
+grep -o 'order:40[4-7]' wazuh.plugin.js  → order:404, order:405, order:406, order:407
+systemctl is-active wazuh-dashboard      → active
+wazuh.plugin.js served HTTP 200          → confirmed in dashboard logs
+
+# Idempotency test (simulated against patched file)
+PECA_APP_MARKER in p          → True  → patch_plugin() would SKIP all steps ✓
+CO_APP_MARKER in p            → True
+,peca, in apps list           → True
+compliance_overview_app in list → True
+```
+
+---
+
+## AWS Deployment — Wazuh Plugin Load Failure After PECA Patch (2026-04-22)
+
+**Follows directly from the PECA dashboard missing incident above.**
+
+### Symptom
+
+Immediately after the peca_app fix and dashboard restart, the browser showed:
+
+```
+Version: 2.19.4  Build: 414402
+Error: Definition of plugin "wazuh" not found and may have failed to load.
+    at read (https://16.170.236.3/414402/bundles/core/core.entry.js:15:453434)
+    at plugin_PluginWrapper.createPluginInstance (...)
+    at plugin_PluginWrapper.setup (...)
+    at plugins_service_PluginsService.setup (...)
+    at async core_system_CoreSystem.setup (...)
+    at async Module.__osdBootstrap__ (...)
+```
+
+The entire dashboard was blank — no sidebar, no modules, no login. All other functionality was broken because the wazuh plugin is a core dependency.
+
+### Root Cause
+
+The `PECA_APP` Python string in `/tmp/patch_peca_plugin.py` had an extra `}` at the end of the `redirectTo` arrow function, producing invalid JavaScript.
+
+The `redirectTo` in the original Wazuh bundles (e.g. TSC at order:405) closes with this sequence:
+
+```
+...?void 0:_store$getState26.id}`:""}`}};
+                                ^  ^   ^^
+                                |  |   ||__ closes peca object `const peca={`
+                                |  |   |___ closes arrow fn body `()=>{`
+                                |  |_______ closes outer template literal
+                                |__________ closes outer `${...}` expression
+```
+
+Breaking it down:
+1. `}` — closes inner `${INNER_EXPR}` (the agentId expression)
+2. `` ` `` — closes inner template literal `` `&agentId=${...}` ``
+3. `:""` — else branch of ternary
+4. `}` — closes outer `${TERNARY}` expression
+5. `` ` `` — closes outer template literal `` `/overview/?tab=...` ``
+6. `}` — closes arrow function body `()=>{...}`
+7. `}` — closes peca object `const peca={...}`
+8. `;` — ends the const statement
+
+Our patch script had:
+
+```python
+'}`:""}`}}'   # contributes: } ` : " " } ` } }   (correct — closes everything)
+'};'           # contributes: } ;                  (WRONG — extra } before ;)
+```
+
+The string `'}`:""}\`}}'` already closes ALL four opens (inner ${}, inner template, outer ${}, outer template, arrow fn, peca object) — two `}` at the end handle the arrow fn and object close. Then `'};'` added a THIRD `}` before `;`, making `}`}}}` instead of `}`}}`.
+
+The resulting JS had three closing braces where only two were valid, making `wazuh.plugin.js` unparseable. The browser's plugin loader caught the exception and reported "Definition of plugin 'wazuh' not found".
+
+### Fix Applied
+
+**On EC2 (live — 2026-04-22 ~18:28 UTC):**
+
+Wrote and ran `/tmp/fix_peca_brace.py`:
+- Anchor: `}`}}};const compliance_overview_app=` (unique — only the peca redirectTo end is immediately followed by compliance_overview_app)
+- Replaced with: `}`}};const compliance_overview_app=` (removed one `}`)
+- File shrank by exactly 1 byte (935,296 → 935,295)
+- Recompressed `.gz` (gzip level 9) and `.br` (brotli quality 11)
+- Restarted `wazuh-dashboard`
+
+**In `patch_bundles.py` (permanent fix):**
+
+`complianceView/patch_bundles.py` line 250:
+```python
+# Before (wrong)
+            '}`:""}`}}'
+    '};'
+)
+
+# After (correct)
+            '}`:""}`}}'
+    ';'
+)
+```
+
+The `'}`:""}\`}}'` string already contains both closing braces (arrow fn + object), so the statement terminator is just `';'` with no leading `}`.
+
+### Verification
+
+```
+# Server logs after fix + restart — no plugin error
+"Starting [57] plugins: [...wazuh...]"                   ✓
+"Server running at https://0.0.0.0:443"                  ✓
+No "failed to load" or "Definition of plugin" errors     ✓
+
+# Peca redirectTo end in patched file
+repr: '...?void 0:_store$getState28.id}`:""}`}};const compliance_overview_app=...'
+                                      ^  ^   ^^
+                                      correct 4-close sequence matching TSC  ✓
+
+# patch_bundles.py syntax check
+python3 -c "import ast; ast.parse(open('patch_bundles.py').read())"  → OK ✓
+```
+
+### Rule Going Forward
+
+When writing minified JS template-literal closings in Python strings, count opens and closes explicitly:
+
+| Open | Closed by |
+|------|-----------|
+| `` return` `` (outer template) | `` ` `` after `:""` |
+| `${` (outer expression) | `}` before `` ` `` (outer template close) |
+| `` ` `` (inner template) | `` ` `` after inner `}` |
+| `${` (inner expression) | `}` (first char in closing sequence) |
+| `()=>{` (arrow fn body) | second-to-last `}` before `;` |
+| `const X={` (object) | last `}` before `;` |
+
+Never append `};` as a blanket terminator when the closing braces are already embedded in the template-literal close sequence.
