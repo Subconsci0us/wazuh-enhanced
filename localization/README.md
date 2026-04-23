@@ -5,7 +5,8 @@ OSD 2.19.4 plugin that injects a persistent floating toolbar into every Wazuh Da
 - **Dark mode** — comprehensive CSS override for OSD chrome and all custom FYP plugins
 - **Urdu / English toggle** — DOM text replacement for networkGraph, nlqSearch, complianceView
 - **RTL layout** — when Urdu is active, page content flips to right-to-left direction
-- **Persistence** — choices survive navigation and page refresh via localStorage
+- **Persistence** — theme and language choices survive navigation and page refresh via `localStorage`
+- **Default theme** — light mode. Dark mode can be toggled via the toolbar button and persists across sessions via `localStorage` key `fyp_theme_v2`
 
 ---
 
@@ -77,6 +78,21 @@ sudo bash setup.sh --only localization
 | Accent         | `#3b82f6` |
 | Danger         | `#f87171` |
 | Success        | `#4ade80` |
+
+Coverage includes: OSD chrome, EUI panels/tables/tabs/forms/badges, `euiBetaBadge` section headings, `euiBreadcrumbWall`, modals, flyouts, popovers, context menus, code blocks, and all custom FYP plugin pages.
+
+---
+
+## Theme persistence
+
+Preferences are stored in `localStorage`:
+
+| Key | Values | Notes |
+|-----|--------|-------|
+| `fyp_theme_v2` | `'light'` \| `'dark'` | Written on first load and on every toggle. Default: `'light'`. |
+| `fyp_language` | `'en'` \| `'ur'` | Written on every language toggle. Default: `'en'` (no entry). |
+
+The older `fyp_theme` key (written by versions before 2026-04-23) is ignored. On first load after the update, `fyp_theme_v2` is absent, so the plugin defaults to light mode regardless of any stale `fyp_theme` value.
 
 ---
 

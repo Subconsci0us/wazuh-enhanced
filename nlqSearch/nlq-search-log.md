@@ -598,3 +598,93 @@ Updated `patch_bundles.py`:
 ### Resolution
 
 After the fix, disabling browser cache (DevTools → Network → Disable Cache) and reloading confirmed Wazuh native pages render correctly. Once the stale cache entry expired, normal browsing (with cache enabled) also worked.
+
+---
+
+## Fix: INDEXER_PASSWORD auto-resolution — 2026-04-23
+
+### Symptom
+
+After first-run installation via `setup.sh`, `nlqSearch/install.sh` wrote `INDEXER_PASSWORD=` (blank) to the plugin's `.env`. The plugin's OpenSearch queries then failed with 401 until the operator manually set the password.
+
+### Root cause
+
+`setup.sh` always printed the manual-action warning unconditionally and never exported `INDEXER_PASSWORD` before calling `install.sh`.
+
+### Fix (in `setup.sh`)
+
+`setup.sh` now calls `resolve_wazuh_passwords()` before the feature loop. That helper locates `wazuh-install-files.tar` machine-independently (no assumed path) and exports `WAZUH_INDEXER_PASSWORD` (the `admin` indexer password).
+
+In `install_nlqSearch()`, the canonical name is mapped to the plugin-specific name before calling `install.sh`:
+
+```bash
+export INDEXER_PASSWORD="${INDEXER_PASSWORD:-${WAZUH_INDEXER_PASSWORD:-}}"
+```
+
+The manual-action warning in `install_nlqSearch()` is now conditional — it only fires if auto-resolution failed:
+
+```bash
+if [ -z "${INDEXER_PASSWORD:-}" ]; then
+    warn "ACTION REQUIRED: INDEXER_PASSWORD could not be auto-resolved. ..."
+fi
+```
+
+### No changes to nlqSearch plugin files
+
+`nlqSearch/install.sh` already reads `INDEXER_PASSWORD` from the environment correctly. The fix is entirely in `setup.sh`.
+
+### Status
+
+Resolved. On first-run install the `.env` is now written with the correct indexer password automatically.
+
+---
+
+## Session 2026-04-23 — Light theme conversion + whitespace fix
+
+### Issue 1 — Dark-mode hardcoded colours
+
+The NLQ Search standalone page (`/app/nlqSearch`) and its injected EN button both used hardcoded dark colours. After the application default was changed to light mode, these looked inconsistent.
+
+### Issue 2 — Whitespace at bottom of page
+
+The `resultsArea` div was initialised with `display:none` and only shown after a query ran. Because no other element had `flex:1`, the flex container (`el`) did not fill its full height, leaving a white gap below the content area.
+
+### Fixes (`public/index.js`)
+
+**Light theme — standalone page:**
+
+| Element | Before | After |
+|---------|--------|-------|
+| Page background | `#0d0d1a` | `#f8fafc` (`min-height:100vh`) |
+| Header | `#12122a` / border `#2a2a4a` | `#f1f5f9` / border `#e2e8f0` |
+| Header title | `#4fc3f7` | `#2b6cb0` |
+| Subtitle | `#666` | `#718096` |
+| Search area | `#12122a` | `#f1f5f9` |
+| Mode toggle (active) | `#1e6091` | `#3182ce` |
+| Mode toggle (inactive) | `#1a1a2e` / `#aaa` | `#e2e8f0` / `#4a5568` |
+| Input textarea | `#1a1a2e` / `#eee` | `#ffffff` / `#1a202c` |
+| IR / DSL areas | `#0d0d1a` | `#f8fafc` |
+| IR editor (monospace) | `#0a0a1a` / `#a8ff78` | `#f8fafc` / `#276749` |
+| DSL display (monospace) | `#0a0a1a` / `#ffd700` | `#f8fafc` / `#744210` |
+| Re-transpile button | dark red | light red (`#fff5f5` / `#c53030`) |
+| Collapse buttons | `#1a1a2e` / `#aaa` | `#e2e8f0` / `#4a5568` |
+| Table header | `#12122a` / `#aaa` | `#f1f5f9` / `#4a5568` |
+| Table rows | `#0d0d1a` / `#101020` | `#ffffff` / `#f7fafc` |
+
+**Light theme — EN button (query-bar injector):**
+
+| State | Before | After |
+|-------|--------|-------|
+| Default bg/text/border | `#1D1E24` / `#98A2B3` / `#69707D` | `#f8f9fa` / `#495057` / `#ced4da` |
+| Hover bg | `#2c2d38` | `#e9ecef` |
+| Active (NLQ on) | `#00BFB3` teal | unchanged |
+| Flash restore | `transparent` / `#98A2B3` | `#f8f9fa` / `#495057` |
+
+**Whitespace fix:**
+- Removed `display:none` from `resultsArea` initial style; changed to `flex:1;min-height:0` so it always fills remaining height
+- `doExecute()` now sets a loading message (`resultsArea.innerHTML = '…'`) instead of toggling display
+- Page container changed from `height:100%` to `min-height:100vh` to guarantee background covers the full viewport
+
+### Status
+
+Built, installed, compressed variants regenerated. ✓

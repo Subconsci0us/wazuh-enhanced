@@ -589,3 +589,141 @@ curl -sk -X DELETE \
 # Navigate to the plugin
 # https://localhost/app/networkGraph
 ```
+
+---
+
+## Fix: WAZUH_API_PASSWORD auto-resolution — 2026-04-23
+
+### Symptom
+
+During first-run installation via `setup.sh`, `networkGraph/install.sh` printed:
+
+```
+WARNING: WAZUH_API_PASSWORD not set.
+Edit <env_file> and set WAZUH_API_PASSWORD, then restart wazuh-dashboard.
+```
+
+The plugin's `.env` was written with a blank `WAZUH_API_PASSWORD=`, causing all Wazuh API calls to fail with 401 until the operator manually edited the file.
+
+### Root cause
+
+`setup.sh` never resolved or exported `WAZUH_API_PASSWORD` before calling `install.sh`. The variable was only populated if the operator had set it in their shell environment before running the script.
+
+### Fix (in `setup.sh`)
+
+Added `resolve_wazuh_passwords()` helper to `setup.sh`. It locates `wazuh-install-files.tar` on any machine (checks `$REPO_DIR`, `$HOME`, `/root`, `/tmp`, then falls back to `find / -maxdepth 6`) and parses the `wazuh-wui` API password from `wazuh-install-files/wazuh-passwords.txt` inside the tar:
+
+```bash
+WAZUH_API_PASSWORD=$(... | grep -A1 "api_username: 'wazuh-wui'" \
+    | grep "api_password:" | sed "s/.*api_password: '//;s/'.*//")
+export WAZUH_API_PASSWORD
+```
+
+This is called once before the feature loop. Because `_sudo` uses `sudo -E`, the exported variable is visible to `networkGraph/install.sh` with no further changes to this plugin.
+
+### No changes to networkGraph files
+
+`networkGraph/install.sh` already reads `WAZUH_API_PASSWORD` from the environment correctly. The fix is entirely in `setup.sh`.
+
+### Status
+
+Resolved. On first-run install the `.env` is now written with the correct password automatically.
+
+---
+
+## Session 2026-04-23 — Wazuh Dashboard Threat Intelligence Sidebar Integration
+
+### Goal
+
+Register the Network Graph plugin as a native entry in the Wazuh Dashboard's **Threat Intelligence** sidebar section, matching how PECA and Compliance Overview appear under Security Operations.
+
+### Design decision: wazuh.plugin.js only
+
+Unlike PECA and Compliance Overview (which are Wazuh overview-module tabs requiring `wazuh.chunk.2.js` changes for the catalog map, DataSource class, tab counts, and module-tab config), Network Graph is a **standalone OSD plugin** at `/app/networkGraph`. The Wazuh sidebar just needs a registered app entry; there is no module tab, no DataSource, and no chunk.2.js change required.
+
+The `redirectTo` points directly to the plugin URL:
+```js
+redirectTo: () => '/app/networkGraph'
+```
+No agent-context store lookup needed — network topology is a global view, not per-agent.
+
+### App constant (wazuh.plugin.js)
+
+```js
+const network_graph_app = {
+  category: "wz-category-threat-intelligence",
+  id: "network-graph",
+  title: i18n("wz-app-network-graph-title", { defaultMessage: "Network Graph" }),
+  breadcrumbLabel: i18n("wz-app-network-graph-breadcrumbLabel", { defaultMessage: "Network Graph" }),
+  description: i18n("wz-app-network-graph-description", { defaultMessage: "Visualize agent network topology, live connections, and alert traffic across your monitored infrastructure." }),
+  euiIconType: "visNetwork",
+  order: 303,
+  showInOverviewApp: true,
+  showInAgentMenu: false,
+  redirectTo: () => '/app/networkGraph'
+};
+```
+
+Order 303 places it after MITRE ATT&CK (302) in the Threat Intelligence category.
+
+### Files changed
+
+| File | Change |
+|------|--------|
+| `networkGraph/patch_plugin.py` | **New** — idempotent Python patch script for `wazuh.plugin.js` |
+| `setup.sh` `install_networkGraph()` | **Updated** — added Step 2 (run `patch_plugin.py`) and Step 3 (regenerate `.gz`/`.br` compressed variants) |
+
+### patch_plugin.py logic
+
+- Primary anchor: inserts `network_graph_app` immediately after `compliance_overview_app`'s `redirectTo` line, before `const docker=`
+- Fallback anchor: inserts before `const docker=` using the TSC redirect anchor (for installs without complianceView)
+- Apps list: inserts `network_graph_app` after `compliance_overview_app` in the sorted apps array; fallback inserts before `.sort(` call
+- All patches are idempotent — re-running detects the marker and skips
+
+### Patch verified on live system (2026-04-23)
+
+```
+=== Patching wazuh.plugin.js (networkGraph sidebar entry) ===
+  [OK]   applied: network_graph_app definition (after compliance_overview_app)
+  [OK]   applied: apps list: insert network_graph_app after compliance_overview_app
+plugin.js written.
+
+Network Graph sidebar patch complete.
+```
+
+Compressed files regenerated (.gz and .br) and `wazuh-dashboard` restarted successfully.
+
+### Status
+
+Complete. Network Graph now appears in the Wazuh Dashboard under **Threat Intelligence** in the sidebar navigation.
+
+---
+
+## Session 2026-04-23 — Light theme conversion
+
+### Issue
+
+The Network Graph plugin page used hardcoded dark colours (`#0d0d1a` backgrounds, `#eee` text, dark SVG canvas). The rest of the Wazuh Dashboard runs in light mode; the plugin stood out as an inconsistent dark island.
+
+### Changes (`public/index.js`)
+
+| Element | Before | After |
+|---------|--------|-------|
+| Page background | `#0d0d1a` | `#f8fafc` |
+| Header bar | `#12122a` / border `#2a2a4a` | `#f1f5f9` / border `#e2e8f0` |
+| Header title | `#4fc3f7` | `#2b6cb0` |
+| Status text | `#888` | `#718096` |
+| Refresh button | `#1e6091` | `#3182ce` |
+| Legend bar | `#0d0d1a` / border `#1a1a3a` | `#f8fafc` / border `#e2e8f0` |
+| SVG canvas background | `#0d0d1a` | `#f8fafc` |
+| Agent node fill | `#1a1a2e` | `#f1f5f9` |
+| Agent OS abbreviation text | `#cccccc` | `#4a5568` |
+| Agent name label | `#dddddd` | `#4a5568` |
+| Tooltip background | `rgba(0,0,0,0.85)` | `rgba(255,255,255,0.97)` + border + shadow |
+| Tooltip text | `#eee` | `#1a202c` |
+
+Edge colours (gray/green/yellow/red) and manager/active/inactive node border colours are unchanged — they are semantic and already contrast well on a light background.
+
+### Status
+
+Built, installed, compressed variants regenerated. ✓

@@ -363,3 +363,176 @@ Changed module config:
 Wazuh Dashboard → left sidebar → **Modules** → Security operations → **PECA**
 - First tab: **Dashboard** (5 inline visualizations)
 - Second tab: **Events** (discover/alert table)
+
+---
+
+## Session 4 — 2026-04-23: Missing PECA Detection Rules Added
+
+### Goal
+Extend `peca_rules.xml` to cover all PECA Chapter II sections that are
+detectable in a SIEM, filling the gap left by the original 4 rules (100100–100103).
+
+### Pre-work: Docker Shutdown
+Wazuh Docker stack (`single-node`) was running and was shut down before this
+session to ensure the local installation is used:
+```bash
+cd /home/mint/wazuh-docker-test/wazuh-docker-4.14.3/single-node
+docker compose down
+```
+
+### Source Document Analysis
+
+The complete PECA 2016 Act PDF (`/media/sf_sharedfolderclone/peca.pdf`, 29 pages)
+was read in full. All 51 sections were evaluated against Wazuh's available log
+sources. Analysis focused on Chapter II (Offences and Punishments, Sections 3–23).
+
+**README Title Errors Found and Corrected:**
+
+The previous README contained three incorrect section titles:
+
+| Entry in old README | Correct title (from PDF) |
+|---------------------|-------------------------|
+| Sec 21: "Cyber Terrorism" | Sec 21: **Cyber Stalking** |
+| Sec 36: "Data Protection of Service Providers" | Sec 36: **Real-time Collection and Recording of Information** |
+| Sec 37: "Data Retention" | Sec 37: **Forensic Laboratory** |
+
+Section 10 is the actual Cyber Terrorism section. Sections 36 and 37 are both
+out of scope — they are investigative-power provisions in Chapter III/IV, not
+criminal offences, and they generate no system log events.
+
+### Sections Analysed
+
+**Chapter II — all 21 sections evaluated:**
+
+| Section | Title | Decision | Rationale |
+|---------|-------|----------|-----------|
+| 3  | Unauthorized Access | Already covered | Rule 100100 |
+| 4  | Unauthorized Copying/Transmission | Already covered | Rule 100101 |
+| 5  | Interference with Information System or Data | **Added** | Syscheck file deletion (SID 553) |
+| 6  | Unauthorized Access to Critical Infra | Already covered | Rule 100102 |
+| 7  | Unauthorized Copying of Critical Infra Data | **Added** | Syscheck new file on critical path (SID 554) |
+| 8  | Interference with Critical Infra | Already covered | Rule 100102 |
+| 9  | Glorification of an Offence | Out of scope | Content-based: no system log event |
+| 10 | Cyber Terrorism | **Added** | Overlay on Sec 6/7/8 parent rules (SID 100102, 100105) |
+| 10A | Hate Speech | Out of scope | Content-based: no system log event |
+| 10B | Recruitment/Funding/Planning of Terrorism | Out of scope | Content-based: no system log event |
+| 11 | Electronic Forgery | Already covered | Rule 100101 |
+| 12 | Electronic Fraud | **Added** | Web app injection attacks (if_group web + match) |
+| 13 | Making/Obtaining Device for Use in Offence | **Added** | Syscheck: offensive tool binary added (SID 554 + match) |
+| 14 | Unauthorized Use of Identity Information | **Added** | Syscheck: /etc/shadow modified (SID 550 + match) |
+| 15 | Unauthorized Issuance of SIM Cards | Out of scope | Telecoms-operator obligation; no SIEM event |
+| 16 | Tampering with Communication Equipment | Out of scope | Physical IMEI tampering; no standard log source |
+| 17 | Unauthorized Interception | **Added** | Rootcheck: promiscuous mode / packet capture (if_group rootcheck + match) |
+| 18 | Offences Against Dignity | Out of scope | Content-based: no system log event |
+| 19 | Offences Against Modesty | Out of scope | Content-based: no system log event |
+| 19A | Child Pornography | Out of scope | Content-based: no system log event |
+| 20 | Malicious Code | Already covered | Rule 100103 |
+| 21 | Cyber Stalking | **Added** | SSHD repeated auth failures (SID 5716) |
+| 22 | Spamming | **Added** | Postfix bounce/reject/flood events (if_group postfix + match) |
+| 23 | Spoofing | **Added** | Network attack: ARP/DNS spoofing (if_group attack + match) |
+
+**Chapters III–VII (Sec 24–51) — all out of scope:**
+Procedural, investigative-power, administrative, and international-cooperation
+sections. None generate system log events detectable by a SIEM.
+
+### New Rules Added
+
+All 10 new rules appended to `peca-compliance/peca_rules.xml` inside the
+existing `<group name="peca,">` block. Existing rules 100100–100103 were not
+modified.
+
+| Rule ID | PECA Section | Title | Level | Parent Anchor |
+|---------|-------------|-------|-------|---------------|
+| 100104 | 5  | Interference with Information System | 10 | if_sid 553 (syscheck file deleted) |
+| 100105 | 7  | Unauthorized Copy of Critical Infra Data | 12 | if_sid 554 + match /opt/critical_app |
+| 100106 | 10 | Cyber Terrorism | 12 | if_sid 100102, 100105 |
+| 100107 | 12 | Electronic Fraud | 10 | if_group web + injection match |
+| 100108 | 13 | Hacking Tool Detected | 7  | if_sid 554 + tool name match |
+| 100109 | 14 | Identity Information Theft | 10 | if_sid 550 + match /etc/shadow |
+| 100110 | 17 | Unauthorized Interception | 10 | if_group rootcheck + promiscuous/pcap match |
+| 100111 | 21 | Cyber Stalking | 7  | if_sid 5716 (SSHD multiple auth failures) |
+| 100112 | 22 | Spamming | 7  | if_group postfix + bounce/reject match |
+| 100113 | 23 | Spoofing | 10 | if_group attack + spoof/arp-poison match |
+
+### Rule Design Decisions
+
+**Section 5 (SID 553 — file deleted):** File deletion is the most reliable
+syscheck-visible indicator of intentional system interference. Bulk deletion
+is characteristic of wiper malware and destructive DoS-type attacks.
+
+**Section 7 (SID 554 + match):** A new file appearing in a monitored critical
+path is the earliest syscheck-visible signal of data staging prior to
+exfiltration. Narrowed to `/opt/critical_app` to match the existing critical
+infrastructure path convention used in rule 100102.
+
+**Section 10 (Cyber Terrorism) — rule chaining:** Rather than extending the
+broad `critical_infrastructure` group (which would risk rule recursion since
+100105 also outputs that group), rule 100106 extends specific SIDs 100102 and
+100105. This fires the cyber-terrorism overlay exactly when a critical-infra
+event is confirmed, with no chaining ambiguity. Output group does NOT include
+`critical_infrastructure` to prevent circular re-triggering.
+
+**Section 12 (Electronic Fraud):** Extended `if_group web` (covers all
+Apache/nginx/IIS web log rules) with a match filter for injection and fraud
+keywords. The match filter is required to avoid firing on every web access
+log entry.
+
+**Section 13 (Hacking Tools):** Used SID 554 (new file) with a match list of
+known offensive-security tool names (nmap, metasploit, sqlmap, hydra, aircrack,
+hashcat, john, nikto, netcat, msfconsole). Requires syscheck to monitor the
+directories where tools would be installed (/usr/bin, /opt, /tmp etc.).
+
+**Section 14 (Identity Information):** Used SID 550 (integrity changed) with
+match `/etc/shadow` — the most definitive credential file on Linux. `/etc/passwd`
+modification is already common for legitimate user management; `/etc/shadow`
+modification is far more specific and suspicious.
+
+**Section 17 (Interception) vs Section 20 (Malicious Code):** Both extend
+`if_group rootcheck`. Rule 100103 (Sec 20) fires on ALL rootcheck events
+(no match filter). Rule 100110 (Sec 17) adds a match filter for
+`promiscuous|tcpdump|tshark|wireshark|libpcap` — so it fires only on rootcheck
+events that contain packet-capture indicators. Both rules can fire on the same
+event when rootcheck reports a sniffer — this is correct (the event maps to
+two different PECA sections).
+
+**Section 21 (Cyber Stalking) vs Section 3 (Unauthorized Access):** Rule 100100
+(Sec 3) fires on single auth failures (SIDs 5710, 5716, 5503, 5504). Rule 100111
+(Sec 21) fires specifically on SID 5716 (SSHD multiple auth failures = brute-force
+pattern), which implies persistence — the distinguishing behavioral element of
+cyber stalking. Both rules will fire when SID 5716 triggers; this dual-tagging
+is intentional.
+
+**Section 22 (Spamming):** Used `if_group postfix` to hook into the Postfix
+log integration. Added a match filter (`reject|bounce|flood|too many|rate.limit|
+blacklist|spam`) to avoid firing on every routine mail delivery event.
+
+**Section 23 (Spoofing):** Used `if_group attack` (covers Snort/Suricata/arpwatch
+integration rules) with a match for `spoof|arp.poison|arp_spoof|dns.poison|
+cache.poison|gratuitous.arp` to isolate network-layer identity forgery events.
+
+### Files Modified
+
+| File | Change |
+|------|--------|
+| `peca-compliance/peca_rules.xml` | Added rules 100104–100113 (10 new rules) inside existing group block |
+| `peca-compliance/README.md` | Fixed 3 incorrect section titles; added rows for all new rules; added out-of-scope section tables |
+| `peca-compliance/PECA-2016-compliance-module.md` | Appended this session log |
+
+### setup.sh — No Changes Required
+
+The `install_pecaRules()` function in `setup.sh` copies all `peca_*.xml` files
+from the repo's `peca-compliance/` directory to `/var/ossec/etc/rules/`. Because
+the new rules are added to the existing `peca_rules.xml` file (not a new file),
+no changes to `setup.sh` are needed.
+
+To deploy the updated rules to the local Wazuh manager:
+```bash
+sudo bash /media/sf_sharedfolderclone/wazuh-fyp-repo/setup.sh --only pecaRules
+```
+
+### Current State
+
+- `peca_rules.xml` now contains 14 rules (100100–100113)
+- 16 PECA sections are covered by active rules (3, 4, 5, 6, 7, 8, 10, 11, 12, 13, 14, 17, 20, 21, 22, 23)
+- All remaining Chapter II sections have been explicitly evaluated and documented as out of scope
+- Rules have not yet been deployed; the local Wazuh manager must be restarted after `setup.sh --only pecaRules` to load the new rules

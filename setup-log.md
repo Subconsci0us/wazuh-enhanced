@@ -510,3 +510,83 @@ Now: single restart after all features complete.
 ### README.md
 
 Added "Feature Flags" subsection under "How to Run setup.sh" with usage examples, feature table, error handling notes, and single-restart behaviour.
+
+---
+
+## Session: setup.sh Bug Fixes — 2026-04-23
+
+### Issues fixed
+
+Two bugs in `setup.sh` that surfaced during first-run installation on a fresh machine.
+
+---
+
+### Fix 1 — Wazuh Indexer health check timing out (Issue 2)
+
+**File:** `setup.sh` — `install_wazuh()` function
+
+**Symptom:** The indexer health check looped through all 60 retries (300 s) and then called `fatal`, aborting the install. On a second run, Wazuh was already installed so the check was skipped and everything succeeded.
+
+**Root cause:** The check was:
+```bash
+until curl -sk https://localhost:9200 | grep -q '"status"' 2>/dev/null; do
+```
+A freshly-started Wazuh indexer has security enabled by default. `curl` without credentials gets back `HTTP 401 Unauthorized` — the body contains no `"status"` field, so `grep` never matched and the loop ran to exhaustion. The indexer was healthy the entire time.
+
+**Fix:** Check the HTTP response code instead of the body. `401` means the indexer is up and enforcing auth; `000` means connection refused (still starting).
+
+```bash
+until _IDX_CODE=$(curl -sk -o /dev/null -w "%{http_code}" https://localhost:9200 2>/dev/null) \
+        && { [ "$_IDX_CODE" = "200" ] || [ "$_IDX_CODE" = "401" ]; }; do
+```
+
+Success message now prints the actual code: `Wazuh Indexer is healthy (HTTP 401).`
+
+---
+
+### Fix 2 — wazuh-install-files.tar path not portable (Issue 5)
+
+**File:** `setup.sh` — new `resolve_wazuh_passwords()` helper
+
+**Symptom:** Post-install password lookup assumed the tar was at `~/wazuh-install-files.tar`. On some machines the Wazuh all-in-one installer places it elsewhere (e.g. the repo dir, `/root/`, `/tmp/`). The script either silently left passwords blank or required manual intervention.
+
+**Fix:** Added `resolve_wazuh_passwords()` which searches four known locations in order, then falls back to `find / -maxdepth 6` if none match:
+
+```
+$REPO_DIR/wazuh-install-files.tar
+$HOME/wazuh-install-files.tar
+/root/wazuh-install-files.tar
+/tmp/wazuh-install-files.tar
+→ find / -maxdepth 6 -name "wazuh-install-files.tar" -type f (fallback)
+```
+
+Once the tar is found it reads `wazuh-install-files/wazuh-passwords.txt` (via `_sudo tar -xOf`) and parses two values:
+
+| Exported variable | Source in passwords file | Used by |
+|---|---|---|
+| `WAZUH_API_PASSWORD` | `api_username: 'wazuh-wui'` → `api_password:` | networkGraph/install.sh |
+| `WAZUH_INDEXER_PASSWORD` | `indexer_username: 'admin'` → `indexer_password:` | nlqSearch, complianceView |
+
+The function is called once in `main` immediately after `shared_setup`, before the feature loop. It is non-fatal (`|| true`) — if the tar is genuinely absent the script continues and each plugin's own install.sh prints its specific warning.
+
+---
+
+### Fix 3 — WAZUH_API_PASSWORD / INDEXER_PASSWORD not passed to plugins (Issue 6)
+
+**Files:** `setup.sh` — `install_networkGraph()`, `install_nlqSearch()`, `install_complianceView()`
+
+**Symptom:** `networkGraph/install.sh` warned `WAZUH_API_PASSWORD not set` and wrote a blank value to the plugin `.env`. Same problem latent in nlqSearch (`INDEXER_PASSWORD`) and complianceView (`OS_PASSWORD`).
+
+**Root cause:** The passwords were never resolved or exported before the plugin install scripts ran.
+
+**Fix:** `resolve_wazuh_passwords()` (Fix 2 above) exports `WAZUH_API_PASSWORD` and `WAZUH_INDEXER_PASSWORD`. Since `_sudo` uses `sudo -E`, these are preserved in the child process. Plugin-specific name mapping is done in each install function before the subprocess call:
+
+- `install_networkGraph` — no change needed; `networkGraph/install.sh` already reads `WAZUH_API_PASSWORD` directly and `sudo -E` passes it through.
+- `install_nlqSearch` — added `export INDEXER_PASSWORD="${INDEXER_PASSWORD:-${WAZUH_INDEXER_PASSWORD:-}}"` before calling `install.sh`. Manual-action warning is now conditional (only shown if auto-resolve failed).
+- `install_complianceView` — added `export OS_PASSWORD="${OS_PASSWORD:-${WAZUH_INDEXER_PASSWORD:-}}"` before calling `install.sh`.
+
+### Files changed
+
+| File | Change |
+|---|---|
+| `setup.sh` | Fixed indexer health check (HTTP code, not body); added `resolve_wazuh_passwords()`; added env var mapping in `install_nlqSearch` and `install_complianceView` |

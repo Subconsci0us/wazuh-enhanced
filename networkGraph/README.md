@@ -8,7 +8,7 @@ An OpenSearch Dashboards (OSD) plugin that renders a live, interactive D3.js for
 
 ![Network Graph showing 3 agents connected to the Wazuh manager, with a hover tooltip displaying agent details](graphTest.jpg)
 
-*Screenshot: 3 test agents connected to the Wazuh Manager. The hover tooltip shows agent ID, IP, OS, and connection status. All edges are gray (no alerts active during this test).*
+*Screenshot: 3 test agents connected to the Wazuh Manager. The hover tooltip shows agent ID, IP, OS, and connection status. All edges are gray (no alerts active during this test). Note: screenshot pre-dates the 2026-04-23 light theme update — the canvas background is now `#f8fafc` (light grey).*
 
 - **Manager node** — large blue circle labelled `MGR` at the centre
 - **Agent nodes** — smaller circles labelled with OS type (`WIN`, `DEB`, `RPM`, `LNX`)
@@ -33,7 +33,7 @@ An OpenSearch Dashboards (OSD) plugin that renders a live, interactive D3.js for
 - Zoom and pan the graph canvas (mouse wheel + drag on background)
 - Drag individual nodes to rearrange the layout
 - Hover tooltip showing agent ID, name, IP, OS, and connection status
-- Appears in the Wazuh Dashboard sidebar under **Wazuh > Network Graph**
+- Appears in the Wazuh Dashboard sidebar under **Threat Intelligence > Network Graph** (registered via `patch_plugin.py`)
 - No external network calls from the browser — all Wazuh API traffic goes through a server-side proxy route
 
 ---
@@ -140,7 +140,7 @@ After installation, open the Wazuh Dashboard:
 https://<your-host-ip>/app/networkGraph
 ```
 
-Or navigate via the sidebar: **Wazuh > Network Graph**.
+Or navigate via the Wazuh sidebar: **Threat Intelligence > Network Graph**.
 
 ---
 

@@ -425,3 +425,33 @@ When writing minified JS template-literal closings in Python strings, count open
 | `const X={` (object) | last `}` before `;` |
 
 Never append `};` as a blanket terminator when the closing braces are already embedded in the template-literal close sequence.
+
+---
+
+## Fix: OS_PASSWORD auto-resolution — 2026-04-23
+
+### Symptom
+
+After first-run installation via `setup.sh`, `complianceView/install.sh` wrote `OS_PASSWORD=` (blank) to the plugin's `.env`. The plugin's OpenSearch API routes then returned 401 until the operator manually edited the file.
+
+### Root cause
+
+`setup.sh` never exported `OS_PASSWORD` before calling `install.sh`. The variable was only populated if it had been set in the operator's shell environment before running the script.
+
+### Fix (in `setup.sh`)
+
+`setup.sh` now calls `resolve_wazuh_passwords()` before the feature loop. That helper locates `wazuh-install-files.tar` machine-independently and exports `WAZUH_INDEXER_PASSWORD` (the `admin` indexer password).
+
+In `install_complianceView()`, the canonical name is mapped to the plugin-specific name before calling `install.sh`:
+
+```bash
+export OS_PASSWORD="${OS_PASSWORD:-${WAZUH_INDEXER_PASSWORD:-}}"
+```
+
+### No changes to complianceView plugin files
+
+`complianceView/install.sh` already reads `OS_PASSWORD` from the environment correctly. The fix is entirely in `setup.sh`.
+
+### Status
+
+Resolved. On first-run install the `.env` is now written with the correct password automatically.

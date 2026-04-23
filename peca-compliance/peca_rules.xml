@@ -29,4 +29,115 @@
     <group>rootcheck,peca_20,</group>
   </rule>
 
+  <!-- PECA Section 5: Interference with Information System or Data -->
+  <!-- Sec 5 covers unauthorized damage to any part or whole of an information system or data. -->
+  <!-- File deletion reported by syscheck is the most reliable SIEM signal for intentional -->
+  <!-- system interference; bulk deletion is characteristic of DoS-type or wiper attacks.    -->
+  <rule id="100104" level="10">
+    <if_sid>553</if_sid>
+    <description>PECA Sec 5: Interference with Information System — File Deletion Detected.</description>
+    <group>syscheck,peca_5,</group>
+  </rule>
+
+  <!-- PECA Section 7: Unauthorized Copying or Transmission of Critical Infrastructure Data -->
+  <!-- Sec 7 targets exfiltration of critical infrastructure data. A new file appearing    -->
+  <!-- inside a monitored critical path is the earliest syscheck-visible signal of data    -->
+  <!-- staging prior to transmission.                                                       -->
+  <rule id="100105" level="12">
+    <if_sid>554</if_sid>
+    <match>/opt/critical_app</match>
+    <description>PECA Sec 7: Unauthorized Copy of Critical Infrastructure Data — New File in Protected Path.</description>
+    <group>syscheck,peca_7,critical_infrastructure,</group>
+  </rule>
+
+  <!-- PECA Section 10: Cyber Terrorism -->
+  <!-- Sec 10 defines cyber terrorism as committing offences under Sec 6, 7, 8 or 9 with  -->
+  <!-- intent to coerce government or advance sectarian/ethnic objectives. In SIEM terms,  -->
+  <!-- any confirmed critical-infrastructure attack (already detected by rules 100102/100105) -->
+  <!-- carries cyber-terrorism risk and is elevated here to the maximum severity level.    -->
+  <rule id="100106" level="12">
+    <if_sid>100102, 100105</if_sid>
+    <description>PECA Sec 10: Cyber Terrorism — Critical Infrastructure Attack Detected.</description>
+    <group>peca_10,attack,</group>
+  </rule>
+
+  <!-- PECA Section 12: Electronic Fraud -->
+  <!-- Sec 12 covers using an information system to deceive or induce a person into a      -->
+  <!-- relationship for wrongful gain. Web-layer injection attacks (SQL injection, XSS)    -->
+  <!-- are the primary SIEM-visible mechanism for system-based fraud.                      -->
+  <rule id="100107" level="10">
+    <if_group>web</if_group>
+    <match>SQL|sql_injection|injection|XSS|cross.site|fraud</match>
+    <description>PECA Sec 12: Electronic Fraud — Web Application Injection Attack Detected.</description>
+    <group>web,peca_12,attack,</group>
+  </rule>
+
+  <!-- PECA Section 13: Making, Obtaining or Supplying Device for Use in Offence -->
+  <!-- Sec 13 covers producing or importing any system or device primarily intended for    -->
+  <!-- committing an offence. Syscheck detecting a known offensive-security tool binary    -->
+  <!-- added to the filesystem is the closest SIEM-visible indicator.                      -->
+  <rule id="100108" level="7">
+    <if_sid>554</if_sid>
+    <match>nmap|metasploit|sqlmap|hydra|aircrack|hashcat|john|nikto|netcat|msfconsole</match>
+    <description>PECA Sec 13: Hacking Tool Detected — Offensive Tool Binary Added to System.</description>
+    <group>syscheck,peca_13,attack,</group>
+  </rule>
+
+  <!-- PECA Section 14: Unauthorized Use of Identity Information -->
+  <!-- Sec 14 targets obtaining, selling, possessing or transmitting another person's      -->
+  <!-- identity information without authorisation. Modification of /etc/shadow is the      -->
+  <!-- clearest syscheck signal for credential harvesting on Linux systems.                -->
+  <rule id="100109" level="10">
+    <if_sid>550</if_sid>
+    <match>/etc/shadow</match>
+    <description>PECA Sec 14: Unauthorized Use of Identity Information — Credential File Modified.</description>
+    <group>syscheck,peca_14,</group>
+  </rule>
+
+  <!-- PECA Section 17: Unauthorized Interception -->
+  <!-- Sec 17 covers interception by technical means of any non-public transmission.       -->
+  <!-- Rootcheck detects network interfaces placed into promiscuous mode and the presence  -->
+  <!-- of packet-capture tooling — the primary host-based indicators of active intercept. -->
+  <rule id="100110" level="10">
+    <if_group>rootcheck</if_group>
+    <match>promiscuous|tcpdump|tshark|wireshark|libpcap</match>
+    <description>PECA Sec 17: Unauthorized Interception — Packet Capture or Promiscuous Mode Detected.</description>
+    <group>rootcheck,peca_17,</group>
+  </rule>
+
+  <!-- PECA Section 21: Cyber Stalking -->
+  <!-- Sec 21 covers using an information system to persistently follow, contact or        -->
+  <!-- monitor a person with intent to coerce, intimidate or harass. Repeated targeted     -->
+  <!-- authentication failures (Wazuh rule 5716 = multiple SSH auth failures) are the     -->
+  <!-- closest SIEM-observable proxy for persistent hostile contact attempts.              -->
+  <rule id="100111" level="7">
+    <if_sid>5716</if_sid>
+    <description>PECA Sec 21: Cyber Stalking — Repeated Targeted Authentication Attempts Detected.</description>
+    <group>authentication_failed,peca_21,</group>
+  </rule>
+
+  <!-- PECA Section 22: Spamming -->
+  <!-- Sec 22 covers transmitting harmful, fraudulent, misleading or unsolicited           -->
+  <!-- information without recipient permission for wrongful gain. Postfix log events       -->
+  <!-- indicating rejected, bounced or rate-limited messages are the primary signal for    -->
+  <!-- anomalous bulk outbound SMTP activity on the host.                                  -->
+  <rule id="100112" level="7">
+    <if_group>postfix</if_group>
+    <match>reject|bounce|flood|too many|rate.limit|blacklist|spam</match>
+    <description>PECA Sec 22: Spamming — Anomalous Outbound SMTP Activity Detected.</description>
+    <group>peca_22,</group>
+  </rule>
+
+  <!-- PECA Section 23: Spoofing -->
+  <!-- Sec 23 covers establishing a website or sending information with a counterfeit      -->
+  <!-- source intended to deceive the recipient. ARP poisoning, DNS cache poisoning and    -->
+  <!-- gratuitous ARP floods are the primary network-layer spoofing signals detectable     -->
+  <!-- by Wazuh attack-group rules (Snort/Suricata/arpwatch integrations).                 -->
+  <rule id="100113" level="10">
+    <if_group>attack</if_group>
+    <match>spoof|arp.poison|arp_spoof|dns.poison|cache.poison|gratuitous.arp</match>
+    <description>PECA Sec 23: Spoofing — Network Identity Spoofing Attack Detected.</description>
+    <group>attack,peca_23,</group>
+  </rule>
+
 </group>

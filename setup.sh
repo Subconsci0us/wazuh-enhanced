@@ -285,13 +285,95 @@ shared_setup() {
     info "Waiting for Wazuh Indexer (OpenSearch) to become healthy …"
     RETRIES=60
     COUNT=0
-    until curl -sk https://localhost:9200 | grep -q '"status"' 2>/dev/null; do
+    # Accept HTTP 200 or 401 as "healthy" — the indexer returns 401 Unauthorized
+    # on a fresh install because security is enabled by default. A 401 means the
+    # process is up and accepting connections; 000 means connection refused.
+    until _IDX_CODE=$(curl -sk -o /dev/null -w "%{http_code}" https://localhost:9200 2>/dev/null) \
+            && { [ "$_IDX_CODE" = "200" ] || [ "$_IDX_CODE" = "401" ]; }; do
         COUNT=$((COUNT + 1))
         [ "$COUNT" -ge "$RETRIES" ] && fatal "Wazuh Indexer did not become healthy after $((RETRIES * 5)) seconds."
         info "  Attempt $COUNT/$RETRIES — waiting 5 s …"
         sleep 5
     done
-    success "Wazuh Indexer is healthy."
+    success "Wazuh Indexer is healthy (HTTP $_IDX_CODE)."
+}
+
+# =============================================================================
+# Helper: resolve_wazuh_passwords
+# Locates wazuh-install-files.tar on any machine (no assumed path) and exports:
+#   WAZUH_API_PASSWORD      — the wazuh-wui API password
+#   WAZUH_INDEXER_PASSWORD  — the admin OpenSearch indexer password
+# Safe to call multiple times; skips work if both vars are already set.
+# =============================================================================
+resolve_wazuh_passwords() {
+    if [ -n "${WAZUH_API_PASSWORD:-}" ] && [ -n "${WAZUH_INDEXER_PASSWORD:-}" ]; then
+        return 0
+    fi
+
+    # Check known locations before paying the cost of a full find
+    local _TAR=""
+    for _loc in \
+        "${REPO_DIR}/wazuh-install-files.tar" \
+        "${HOME}/wazuh-install-files.tar" \
+        "/root/wazuh-install-files.tar" \
+        "/tmp/wazuh-install-files.tar"; do
+        if [ -f "$_loc" ]; then
+            _TAR="$_loc"
+            break
+        fi
+    done
+
+    # Fall back to filesystem search (maxdepth 6 avoids /proc and deep mounts)
+    if [ -z "$_TAR" ]; then
+        info "Searching filesystem for wazuh-install-files.tar …"
+        _TAR=$(find / -maxdepth 6 -name "wazuh-install-files.tar" -type f 2>/dev/null | head -1)
+    fi
+
+    if [ -z "$_TAR" ]; then
+        warn "wazuh-install-files.tar not found anywhere on this machine."
+        warn "Set WAZUH_API_PASSWORD and WAZUH_INDEXER_PASSWORD manually before running."
+        return 1
+    fi
+
+    info "Found install tar: $_TAR"
+
+    # Extract the passwords text file from inside the tar (needs sudo if root-owned)
+    local _PWTEXT
+    _PWTEXT=$(_sudo tar -xOf "$_TAR" wazuh-install-files/wazuh-passwords.txt 2>/dev/null)
+    if [ -z "$_PWTEXT" ]; then
+        warn "Could not read wazuh-install-files/wazuh-passwords.txt from $_TAR"
+        return 1
+    fi
+
+    # Parse wazuh-wui API password
+    # Format: api_username: 'wazuh-wui'  (followed by)  api_password: '<value>'
+    if [ -z "${WAZUH_API_PASSWORD:-}" ]; then
+        WAZUH_API_PASSWORD=$(printf '%s\n' "$_PWTEXT" \
+            | grep -A1 "api_username: 'wazuh-wui'" \
+            | grep "api_password:" \
+            | sed "s/.*api_password: '//;s/'.*//")
+        if [ -n "$WAZUH_API_PASSWORD" ]; then
+            export WAZUH_API_PASSWORD
+            success "WAZUH_API_PASSWORD resolved (wazuh-wui)."
+        else
+            warn "Could not parse wazuh-wui api_password — set WAZUH_API_PASSWORD manually."
+        fi
+    fi
+
+    # Parse admin indexer password
+    # Format: indexer_username: 'admin'  (followed by)  indexer_password: '<value>'
+    if [ -z "${WAZUH_INDEXER_PASSWORD:-}" ]; then
+        WAZUH_INDEXER_PASSWORD=$(printf '%s\n' "$_PWTEXT" \
+            | grep -A1 "indexer_username: 'admin'" \
+            | grep "indexer_password:" \
+            | sed "s/.*indexer_password: '//;s/'.*//")
+        if [ -n "$WAZUH_INDEXER_PASSWORD" ]; then
+            export WAZUH_INDEXER_PASSWORD
+            success "WAZUH_INDEXER_PASSWORD resolved (admin)."
+        else
+            warn "Could not parse admin indexer_password — set WAZUH_INDEXER_PASSWORD manually."
+        fi
+    fi
 }
 
 # =============================================================================
@@ -722,7 +804,60 @@ install_networkGraph() {
     info "Running networkGraph/install.sh …"
     (cd "$NET_DIR" && _sudo bash install.sh ${_NORESTART}) \
         || { error "networkGraph/install.sh failed"; return 1; }
-    success "Network Graph plugin installed."
+
+    # ── Step 2: Patch Wazuh plugin.js to add the Threat Intelligence sidebar entry ─
+    WAZUH_PLUGIN="/usr/share/wazuh-dashboard/plugins/wazuh"
+    PLUGIN_JS="$WAZUH_PLUGIN/target/public/wazuh.plugin.js"
+
+    if [ ! -f "$PLUGIN_JS" ]; then
+        error "wazuh.plugin.js not found — is Wazuh Dashboard installed?"
+        return 1
+    fi
+
+    info "Backing up wazuh.plugin.js (if not already done) …"
+    [ -f "${PLUGIN_JS}.orig" ] || _sudo cp "$PLUGIN_JS" "${PLUGIN_JS}.orig"
+
+    info "Patching Wazuh sidebar navigation (Threat Intelligence entry) …"
+    _sudo python3 "$NET_DIR/patch_plugin.py" \
+        || { error "Sidebar patch failed — restoring original …"
+             _sudo cp "${PLUGIN_JS}.orig" "$PLUGIN_JS"
+             return 1; }
+
+    # ── Step 3: Regenerate compressed bundle files ────────────────────────────
+    # The dashboard prefers .br > .gz > .js when serving bundles.
+    # Remove stale compressed variants so it serves the patched .js.
+    info "Updating compressed bundle files …"
+
+    if ! command -v brotli >/dev/null 2>&1; then
+        if command -v apt-get >/dev/null 2>&1; then
+            _sudo apt-get install -y brotli 2>/dev/null | grep -E "^(Get|Inst|Sett)" || true
+        elif command -v yum >/dev/null 2>&1; then
+            _sudo yum install -y brotli 2>/dev/null | grep -E "^(Installed|Updated)" || true
+        fi
+    fi
+
+    _sudo rm -f "${PLUGIN_JS}.gz" "${PLUGIN_JS}.br"
+
+    if command -v gzip >/dev/null 2>&1; then
+        _sudo gzip -9 -k "$PLUGIN_JS" \
+            && _sudo chown wazuh-dashboard:wazuh-dashboard "${PLUGIN_JS}.gz" \
+            || warn "gzip failed — .gz variant skipped"
+    else
+        warn "gzip not found — .gz variant skipped"
+    fi
+
+    if command -v brotli >/dev/null 2>&1; then
+        _sudo brotli --best -k "$PLUGIN_JS" -o "${PLUGIN_JS}.br" \
+            && _sudo chown wazuh-dashboard:wazuh-dashboard "${PLUGIN_JS}.br" \
+            || warn "brotli failed — .br variant skipped"
+    else
+        warn "brotli not found — .br variant skipped"
+    fi
+
+    _sudo chown wazuh-dashboard:wazuh-dashboard "$PLUGIN_JS"
+
+    success "Network Graph plugin installed and registered in Threat Intelligence sidebar."
+    warn "Hard-refresh your browser (Ctrl+Shift+R) after the dashboard restarts."
 }
 
 # =============================================================================
@@ -739,6 +874,9 @@ install_nlqSearch() {
 
     ensure_node
 
+    # Map canonical password to the name nlqSearch/install.sh expects
+    export INDEXER_PASSWORD="${INDEXER_PASSWORD:-${WAZUH_INDEXER_PASSWORD:-}}"
+
     local _NORESTART=""
     [ "${NO_RESTART}" -eq 1 ] && _NORESTART="--no-restart"
 
@@ -752,10 +890,12 @@ install_nlqSearch() {
         warn "  sudo nano /usr/share/wazuh-dashboard/plugins/nlqSearch/server/.env"
         warn "  Set: GEMINI_API_KEY=your-key-here"
     fi
-    warn "ACTION REQUIRED: Set the Wazuh Indexer password for NLQ Search:"
-    warn "  sudo nano /usr/share/wazuh-dashboard/plugins/nlqSearch/server/.env"
-    warn "  Set: INDEXER_PASSWORD=<password from wazuh-install-files.tar>"
-    warn "  Then: sudo systemctl restart wazuh-dashboard"
+    if [ -z "${INDEXER_PASSWORD:-}" ]; then
+        warn "ACTION REQUIRED: INDEXER_PASSWORD could not be auto-resolved."
+        warn "  sudo nano /usr/share/wazuh-dashboard/plugins/nlqSearch/server/.env"
+        warn "  Set: INDEXER_PASSWORD=<admin password from wazuh-install-files.tar>"
+        warn "  Then: sudo systemctl restart wazuh-dashboard"
+    fi
     success "NLQ Search plugin installed. Navigate to https://localhost/app/nlqSearch"
 }
 
@@ -774,6 +914,9 @@ install_complianceView() {
     fi
 
     ensure_node
+
+    # Map canonical password to the name complianceView/install.sh expects
+    export OS_PASSWORD="${OS_PASSWORD:-${WAZUH_INDEXER_PASSWORD:-}}"
 
     local _NORESTART=""
     [ "${NO_RESTART}" -eq 1 ] && _NORESTART="--no-restart"
@@ -901,6 +1044,9 @@ echo ""
 
 # ── Shared setup ───────────────────────────────────────────────────────────────
 shared_setup
+
+# ── Resolve Wazuh passwords from install tar (machine-independent) ─────────────
+resolve_wazuh_passwords || true   # non-fatal: plugins warn if still unset
 
 # ── Feature installation loop ──────────────────────────────────────────────────
 NEEDS_DASH_RESTART=0

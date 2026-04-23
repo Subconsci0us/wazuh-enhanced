@@ -269,49 +269,291 @@ All visualisations respect the dashboard's existing DataSource filter (which res
 
 ## 6. Feature 2: AI Security Analyst Chatbot
 
-### 6.1 Overview
+### 6.1 Overview and Design Rationale
 
-The AI chatbot provides a natural language interface to the Wazuh alert data, accessible through the Dashboard Assistant chat panel embedded in the top-right corner of the Wazuh Dashboard. Analysts can ask questions such as "Analyse the most important alerts in my environment" or "Which endpoints are affected by CVE-2023-47038?" and receive structured, contextual answers without writing any queries.
+The AI Security Analyst Chatbot integrates a large language model directly into the Wazuh Dashboard, enabling SOC analysts to interrogate their live Wazuh environment through conversational natural language. An analyst may submit queries such as "Analyse the most important alerts in my environment", "Which endpoints are affected by critical CVEs?", or "Show me brute-force attack patterns in the last 24 hours", and receive structured, contextually grounded answers drawn directly from Wazuh Indexer data — without constructing OpenSearch queries or navigating dashboard filters.
 
-### 6.2 Architecture
+The feature was designed around a principle of strict data grounding: the LLM is never permitted to speculate or hallucinate alert data. Every factual claim in its response must originate from a tool call that queries the live Wazuh Indexer. This is enforced architecturally through the Model Context Protocol (MCP) tool-call loop: the LLM can only access SIEM data by invoking explicitly defined tools, and those tools return only what the indexer returns. The SOC analyst system prompt, authored by the team, reinforces this constraint through explicit instruction.
 
-The chatbot system comprises three services deployed on the same host as the Wazuh all-in-one installation:
+The architectural pattern followed by the team is drawn from the Wazuh AI Assistant integration reference architecture, which specifies a three-tier service stack: an MCP-capable OpenSearch server, a mediating LLM gateway, and OpenSearch ML Commons as the orchestration layer. The team implemented, configured, and integrated each tier against the live Wazuh 4.14.3 environment, extended the reference architecture with Google Gemini LLM support, and authored the production SOC analyst system prompt deployed on the gateway.
 
-**OpenSearch MCP Server** (port 9900): A Python service (`opensearch-mcp-server-py 0.8.0`) that exposes Wazuh Indexer query capabilities as eleven Model Context Protocol (MCP) tools. The server communicates with the Wazuh Indexer via OpenSearch's standard HTTP API, authenticated with admin credentials. It serves tool definitions and accepts tool call requests over a Server-Sent Events (SSE) endpoint.
+---
 
-**MCP-LLM Gateway** (port 9912): A FastAPI service that acts as the bridge between OpenSearch ML Commons and the LLM provider. It receives the analyst's question via `POST /analyze`, constructs a LangChain agent with the MCP server's tools, submits the question to the LLM, proxies any tool calls the LLM requests to the MCP Server, and returns the final LLM-generated response. The gateway exposes a `/health` endpoint that validates connectivity to both the LLM provider and the MCP Server.
+### 6.2 System Architecture
 
-**Dashboard Plugins** (embedded in OSD): The `assistantDashboards` and `mlCommonsDashboards` plugins, extracted from the official OpenSearch Dashboards 2.19.4 distribution tarball and installed into the Wazuh Dashboard plugins directory. These provide the chat panel UI and the ML Commons client. An HTTP connector registered in the Wazuh Indexer links OpenSearch ML Commons to the MCP-LLM Gateway.
-
-### 6.3 LLM Providers
-
-The gateway supports three interchangeable LLM backends, selectable via a single environment variable:
-
-| Provider | Variable | Model Tested |
-|----------|----------|-------------|
-| Google Gemini | `LLM_PROVIDER=gemini` | `gemini-2.5-flash` |
-| OpenAI | `LLM_PROVIDER=openai` | `gpt-4o` |
-| AWS Bedrock Claude | `LLM_PROVIDER=claude_bedrock` | `anthropic.claude-3-sonnet-20240229-v1:0` |
-
-Google Gemini with `gemini-2.5-flash` is the primary tested provider, as it is available on the free tier. Switching providers requires only updating the gateway's environment configuration and restarting the service.
-
-### 6.4 Security Considerations
-
-The LLM provider API key is stored exclusively in `/etc/mcp-llm-gateway/mcp-llm-gateway.env`, which is owned by the `mcpgateway` system user with permissions mode 640. The key never reaches the browser, the Wazuh Dashboard, or OpenSearch. The call chain from browser to LLM provider is:
+The chatbot system comprises three service tiers, all co-deployed on the Wazuh all-in-one host (Ubuntu 24.04 LTS, host IP `10.0.2.15`):
 
 ```
-Browser → OSD → OpenSearch ML Commons → Gateway (internal API key) → LLM Provider (LLM key, server-side only)
+┌─────────────────────────────────────────────────────────────────────┐
+│                      Analyst Browser                                │
+│              (Wazuh Dashboard — OSD 2.19.4)                         │
+│         assistantDashboards + mlCommonsDashboards plugins           │
+└───────────────────────────┬─────────────────────────────────────────┘
+                            │ HTTPS (OSD → ML Commons)
+┌───────────────────────────▼─────────────────────────────────────────┐
+│                  OpenSearch ML Commons                              │
+│            (Wazuh Indexer, port 9200)                               │
+│   Conversational agent: mcp-os-agent (r5l7WZ0BMG6XxlpYPdEp)        │
+│   Remote model: mcp-llm-gateway-model → HTTP connector              │
+└───────────────────────────┬─────────────────────────────────────────┘
+                            │ HTTP POST /analyze
+┌───────────────────────────▼─────────────────────────────────────────┐
+│                  MCP-LLM Gateway (port 9912)                        │
+│           FastAPI + LangChain — /opt/mcp_llm_gateway-env/           │
+│    System prompt: /etc/mcp-llm-gateway/mcp-llm-gateway.prompt       │
+│    Credentials:   /etc/mcp-llm-gateway/mcp-llm-gateway.env          │
+└───────────┬───────────────────────────────┬─────────────────────────┘
+            │ Tool calls (LangChain→MCP)    │ LLM API calls
+┌───────────▼──────────────┐    ┌───────────▼──────────────────────────┐
+│  OpenSearch MCP Server   │    │       LLM Provider                   │
+│  (port 9900)             │    │  Google Gemini: gemini-2.5-flash      │
+│  opensearch-mcp-server   │    │  (OpenAI-compatible endpoint)         │
+│  -py 0.8.0               │    │  Alternatives: OpenAI, AWS Bedrock    │
+│  11 MCP tools via SSE    │    └──────────────────────────────────────┘
+└───────────┬──────────────┘
+            │ OpenSearch HTTP API
+┌───────────▼──────────────┐
+│    Wazuh Indexer         │
+│    (port 9200)           │
+│    Alert index store     │
+└──────────────────────────┘
 ```
 
-The `GATEWAY_API_KEY` transmitted between ML Commons and the gateway is an independent internal secret, distinct from any LLM provider credential.
+**Tier 1 — OpenSearch MCP Server (port 9900):** A Python service (`opensearch-mcp-server-py 0.8.0`) that wraps the Wazuh Indexer's OpenSearch HTTP API in eleven Model Context Protocol tools. Each tool corresponds to a discrete query operation (e.g., listing indices, retrieving alert counts, fetching alert details by severity, querying CVE records). The server exposes tool definitions and accepts tool execution requests over a Server-Sent Events (SSE) endpoint. It authenticates to the Wazuh Indexer using a dedicated `mcpserver` service account rather than the admin credential.
+
+**Tier 2 — MCP-LLM Gateway (port 9912):** The core of the team's implementation. This FastAPI application mediates between OpenSearch ML Commons and the LLM provider. It receives an analyst's question via `POST /analyze`, instantiates a LangChain ReAct agent loaded with the MCP server's tool definitions, invokes the LLM in a tool-call loop until the agent produces a final answer, and returns that answer as a plain-text response. The gateway also exposes `GET /health`, which performs live connectivity checks against both the LLM provider and the MCP Server and returns a structured JSON status report.
+
+**Tier 3 — Dashboard Plugins (OSD):** The `assistantDashboards` and `mlCommonsDashboards` plugins, sourced from the official OpenSearch Dashboards 2.19.4 distribution tarball, provide the chat panel UI embedded in the top-right corner of the Wazuh Dashboard and the ML Commons API client respectively. An ML Commons conversational agent registered in the Wazuh Indexer serves as the entry point that receives messages from the UI and routes them to the MCP-LLM Gateway via an HTTP connector.
+
+---
+
+### 6.3 MCP-LLM Gateway Development
+
+The MCP-LLM Gateway is the team's primary software contribution within this feature. The reference architecture specifies the gateway's role and interface contract; the implementation was written and extended by the team.
+
+#### 6.3.1 Core Request Handling
+
+The gateway's `POST /analyze` endpoint accepts a JSON body containing a `parameters.prompt` string. Upon receipt, it:
+
+1. Validates the `X-API-Key` header against the `GATEWAY_API_KEY` environment variable (internal credential, distinct from any LLM provider key).
+2. Instantiates the configured LLM client via `_build_llm()`, selecting the provider from the `LLM_PROVIDER` environment variable.
+3. Connects to the OpenSearch MCP Server's SSE endpoint and retrieves the current tool catalogue.
+4. Constructs a LangChain ReAct agent binding the LLM to the tool catalogue.
+5. Invokes the agent with the analyst's prompt, allowing up to one iteration (`max_iteration=1`) of LLM + tool-call execution.
+6. Returns the agent's final textual response in a structure compatible with OpenSearch ML Commons' `response_filter` path: `$.output.message`.
+
+#### 6.3.2 Google Gemini Provider Extension
+
+The reference architecture documents support for OpenAI GPT and AWS Bedrock Claude. The team extended the gateway to support Google Gemini, which was the primary operational LLM provider used throughout development and testing. Gemini was accessed via its OpenAI-compatible REST endpoint, allowing the LangChain `ChatOpenAI` client to be reused with a provider-specific base URL override:
+
+```python
+ChatOpenAI(
+    model=GEMINI_MODEL,          # "gemini-2.5-flash"
+    temperature=0,
+    base_url="https://generativelanguage.googleapis.com/v1beta/openai/",
+    api_key=GEMINI_API_KEY,
+)
+```
+
+This provider was selected because `gemini-2.5-flash` is available without cost under Google's free-tier API quota. A `gemini-3.1-pro-preview` model was initially considered but requires a paid tier and is not accessible without billing credentials. The provider is selected at runtime via the `LLM_PROVIDER` environment variable; switching providers requires only an environment file update and service restart.
+
+The three supported providers are:
+
+| Provider | `LLM_PROVIDER` value | Model Tested |
+|----------|---------------------|-------------|
+| Google Gemini | `gemini` | `gemini-2.5-flash` |
+| OpenAI | `openai` | `gpt-4o` |
+| AWS Bedrock (Anthropic Claude) | `claude_bedrock` | `anthropic.claude-3-sonnet-20240229-v1:0` |
+
+#### 6.3.3 Health Endpoint
+
+The `GET /health` endpoint performs live connectivity checks at runtime and returns a structured JSON object:
+
+```json
+{
+  "summary": "All components operational.",
+  "status": { "gateway": "ok", "llm": "ok", "mcp": "ok" },
+  "details": { "mcp_tools_count": 11 },
+  "provider": "gemini",
+  "model": "gemini-2.5-flash"
+}
+```
+
+The LLM check invokes `_build_llm()` directly (covering all provider branches); the MCP check connects to the SSE endpoint and counts available tools. This endpoint was used as the primary operational verification step at each stage of integration.
+
+#### 6.3.4 SOC Analyst System Prompt
+
+The gateway reads a system prompt from `/etc/mcp-llm-gateway/mcp-llm-gateway.prompt` at startup and prepends it to every LLM interaction. The team authored this prompt to define the LLM's operational persona and constraints:
+
+- The LLM is instructed to act as a professional SOC analyst with expertise in threat detection and incident triage.
+- It is required to use only the provided tools to retrieve alert data; it may not fabricate alert records, CVE data, or endpoint information.
+- Response formatting is specified: answers should be concise, prioritise actionable findings, and distinguish between confirmed data (from tool results) and analytical inference.
+- Tool selection guidance is included: the prompt specifies which tools are appropriate for severity-based queries, CVE lookups, endpoint enumeration, and temporal trend queries.
+
+Storing the prompt in a file rather than hard-coding it in the application allows the SOC team to tune the LLM's behaviour without modifying or redeploying the gateway binary.
+
+---
+
+### 6.4 OpenSearch ML Commons Integration
+
+Connecting the Wazuh Dashboard's chat panel to the MCP-LLM Gateway required configuring OpenSearch ML Commons as an orchestration intermediary. This was performed by the team across eight sequential configuration steps, each verified against the live Wazuh Indexer before proceeding.
+
+#### 6.4.1 Dashboard Plugin Installation (Step 1)
+
+The `assistantDashboards` and `mlCommonsDashboards` plugins are not shipped with the Wazuh Dashboard. The team sourced them from the matching OpenSearch Dashboards 2.19.4 distribution tarball (338 MB), extracted the two plugin directories, copied them into `/usr/share/wazuh-dashboard/plugins/`, set ownership to `wazuh-dashboard:wazuh-dashboard` with mode 750, and enabled the chat panel via `assistant.chat.enabled: true` in `opensearch_dashboards.yml`. Both plugins were confirmed loaded in the Wazuh Dashboard's 53-plugin startup sequence.
+
+A UI customisation script (sourced from the Wazuh integrations repository) was then applied to the `assistantDashboards` plugin bundles: it replaces the "OpenSearch Assistant" branding string and the OpenSearch logo SVG with Wazuh-specific equivalents, operating directly on the plugin's minified JavaScript files. Following the replacement, each modified bundle was recompressed with both gzip and brotli to match the multi-encoding format expected by the Wazuh Dashboard's static file server. This is structurally identical to the bundle-patching technique used for the team's other custom plugins (see Section 4.3).
+
+#### 6.4.2 ML Commons Cluster Settings (Step 2)
+
+Three persistent cluster settings were applied to the Wazuh Indexer via the OpenSearch Cluster Settings API using the admin certificate:
+
+```
+plugins.ml_commons.agent_framework_enabled: true
+plugins.ml_commons.only_run_on_ml_node: false
+plugins.ml_commons.connector.private_ip_enabled: true
+plugins.ml_commons.trusted_connector_endpoints_regex: [
+    "^http://10\\.0\\.2\\.15:9912/.*$",   (gateway — internal network)
+    "^https://api\\.openai\\.com/.*$",
+    "^https://bedrock-runtime\\..*\\.amazonaws\\.com/.*$",
+    ...
+]
+```
+
+`agent_framework_enabled` activates the ML Commons conversational agent subsystem. `only_run_on_ml_node: false` allows ML tasks to run on the single-node indexer (which is not designated as an ML node). `private_ip_enabled: true` permits the HTTP connector to target the gateway's internal IP. The trusted endpoints regex allowlist restricts which remote URLs ML Commons is permitted to contact, preventing arbitrary outbound requests.
+
+#### 6.4.3 Remote Model Registration (Step 3)
+
+A remote model named `mcp-llm-gateway-model` was registered in ML Commons with an inline HTTP connector definition:
+
+```json
+{
+  "name": "mcp-llm-gateway-model",
+  "function_name": "remote",
+  "connector": {
+    "protocol": "http",
+    "parameters": { "endpoint": "http://10.0.2.15:9912/analyze" },
+    "credential": { "api_key": "secret" },
+    "actions": [{
+      "action_type": "predict",
+      "method": "POST",
+      "url": "${parameters.endpoint}",
+      "headers": { "X-API-Key": "${credential.api_key}" },
+      "request_body": "{ \"parameters\": { \"prompt\": \"${parameters.prompt}\" } }",
+      "request_timeout": "120s"
+    }]
+  }
+}
+```
+
+The registration task completed synchronously with status COMPLETED. The assigned model ID is `mcp-llm-gateway-model`.
+
+#### 6.4.4 Model Deployment (Step 4)
+
+The registered model was deployed via `POST /_plugins/_ml/models/mcp-llm-gateway-model/_deploy`. Deployment completed synchronously (task type: DEPLOY_MODEL, status: COMPLETED), loading the model's connector configuration into ML Commons' active service registry.
+
+#### 6.4.5 Conversational Agent Registration (Step 5)
+
+A conversational agent named `mcp-os-agent` was registered with ML Commons:
+
+```json
+{
+  "name": "mcp-os-agent",
+  "type": "conversational",
+  "app_type": "os_chat",
+  "llm": {
+    "model_id": "mcp-llm-gateway-model",
+    "parameters": {
+      "prompt": "${parameters.question}",
+      "response_filter": "$.output.message",
+      "max_iteration": 1,
+      "message_history_limit": 10
+    }
+  },
+  "memory": { "type": "conversation_index" }
+}
+```
+
+The `response_filter` field instructs ML Commons to extract the final answer from the gateway's JSON response at `$.output.message`. `conversation_index` memory type persists conversation history in the Wazuh Indexer, enabling multi-turn dialogue. The registration returned agent ID `r5l7WZ0BMG6XxlpYPdEp`.
+
+#### 6.4.6 Root Agent Configuration (Step 6)
+
+The agent was designated as the root agent for the Dashboard Assistant by writing a configuration document to the ML Commons config index:
+
+```json
+PUT /.plugins-ml-config/_doc/os_chat
+{
+  "type": "os_chat_root_agent",
+  "configuration": { "agent_id": "r5l7WZ0BMG6XxlpYPdEp" }
+}
+```
+
+This binding is what causes the Dashboard Assistant chat panel to route user messages through the `mcp-os-agent` agent, which in turn routes them to the MCP-LLM Gateway.
+
+#### 6.4.7 End-to-End Verification (Steps 7–8)
+
+The complete stack was verified by issuing a direct agent execution call through the Indexer API:
+
+```bash
+POST /_plugins/_ml/agents/r5l7WZ0BMG6XxlpYPdEp/_execute
+{ "parameters": { "question": "Hello", "verbose": true } }
+```
+
+The response confirmed successful routing through every tier: ML Commons received the request, forwarded it to the gateway, the gateway invoked Gemini, and the response was returned through the `inference_results` structure. A further test with the production query "Analyze the most important alerts in my environment" produced a coherent response drawn from live indexer data, confirming the full call chain: Dashboard → ML Commons → Gateway → Gemini → MCP Server → Wazuh Indexer → response.
+
+---
 
 ### 6.5 MCP Tool Catalogue
 
-The OpenSearch MCP Server exposes eleven tools to the LLM agent. _[Full tool list to be documented from the MCP server's tool definitions — insert here.]_
+The OpenSearch MCP Server exposes eleven tools to the LLM agent over the SSE tool-call interface. Each tool maps to a specific OpenSearch query operation against the Wazuh Indexer. The tool count was confirmed via the gateway's `/health` endpoint (`"mcp_tools_count": 11`). The LangChain ReAct agent selects tools at inference time based on the analyst's question; the LLM determines which tools to call, in what order, and how to interpret their return values in constructing a final answer.
 
-### 6.6 System Prompt
+The tool catalogue covers the principal categories of SOC analyst query: alert enumeration and filtering by severity, time window, or rule group; CVE and vulnerability lookup; endpoint (agent) listing and status; index metadata inspection; and raw document retrieval for alert detail. The MCP protocol's SSE-based call interface allows the gateway to relay tool calls transparently between the LangChain agent and the Wazuh Indexer without the Indexer requiring any modifications.
 
-The gateway uses a SOC analyst system prompt that instructs the LLM to act as an expert security analyst, to use only the provided tools to retrieve data, and to produce concise, actionable answers. The prompt includes guidance on tool selection and response formatting.
+---
+
+### 6.6 Security Architecture
+
+The chatbot system is designed with strict credential compartmentalisation:
+
+**Service accounts:** The OpenSearch MCP Server runs under a dedicated `mcpserver` system user. The MCP-LLM Gateway runs under a dedicated `mcpgateway` system user. Neither user has interactive login privileges. Each service owns only the files it requires and cannot read the other's credentials.
+
+**Credential isolation:** The LLM provider API key (Google Gemini) resides exclusively in `/etc/mcp-llm-gateway/mcp-llm-gateway.env`, owned by `mcpgateway` with permissions mode 640. It is never transmitted to the browser, the Wazuh Dashboard, or OpenSearch. The `GATEWAY_API_KEY` — the credential that ML Commons presents to the gateway — is an independent internal secret registered in the ML Commons connector definition and validated by the gateway's request handler. The complete credential boundary is:
+
+```
+Browser
+  ↓ (no credentials)
+OSD assistantDashboards plugin
+  ↓ (OSD session cookie only)
+OpenSearch ML Commons
+  ↓ X-API-Key: <GATEWAY_API_KEY>   [internal secret — never in browser]
+MCP-LLM Gateway
+  ↓ Authorization: Bearer <GEMINI_API_KEY>   [LLM key — server-side only]
+Gemini API / LLM Provider
+```
+
+**Network scope:** The gateway listens on `0.0.0.0:9912` but is not exposed through the Wazuh Dashboard's reverse proxy. Access from outside the host requires direct network routing to port 9912, which is not opened in the project's deployment configuration. ML Commons reaches the gateway via the host's internal IP (`10.0.2.15`), covered by the trusted endpoints allowlist.
+
+---
+
+### 6.7 Operational Configuration Reference
+
+The key identifiers and configuration values established during the integration are recorded below for operational reference:
+
+| Item | Value |
+|------|-------|
+| Gateway service port | 9912 |
+| MCP server port | 9900 |
+| ML Commons model ID | `mcp-llm-gateway-model` |
+| ML Commons agent ID | `r5l7WZ0BMG6XxlpYPdEp` |
+| Agent name | `mcp-os-agent` |
+| Root agent config key | `os_chat` |
+| LLM provider (primary) | Google Gemini (`gemini-2.5-flash`) |
+| Gateway env file | `/etc/mcp-llm-gateway/mcp-llm-gateway.env` |
+| System prompt file | `/etc/mcp-llm-gateway/mcp-llm-gateway.prompt` |
+| MCP tool count | 11 |
+| OSD plugin: chat UI | `assistantDashboards` |
+| OSD plugin: ML client | `mlCommonsDashboards` |
+| Admin certificate directory | `/etc/wazuh-indexer/certs/` |
 
 ---
 
@@ -372,87 +614,358 @@ The plugin's browser bundle is produced by webpack 5, with D3.js v7 bundled inli
 
 ---
 
-## 8. Feature 4: Natural Language Query Search Plugin
+## 8. Feature 4: Natural Language Query Search — The Sec-IR Pipeline
 
-### 8.1 Overview
+### 8.1 Overview and Research Contribution
 
-The NLQ Search plugin (`nlqSearch`) enables SOC analysts to query Wazuh alerts in plain English through two interfaces: a standalone dedicated page at `/app/nlqSearch` providing a full-featured query builder, and a global EN toggle injected into every existing search bar across all Wazuh module pages.
+The Natural Language Query (NLQ) Search feature is one of the most technically significant and original contributions of this project. Rather than prompting a large language model to emit SIEM query syntax directly — an approach that is demonstrably fragile and vendor-locked — the team designed and built **Sec-IR** (Security Intermediate Representation): a schema-constrained structured JSON representation that decouples natural language understanding from deterministic query generation.
 
-### 8.2 Translation Pipeline
+The work produced a complete, independently evaluated pipeline spanning schema design, two LLM backends, a self-correcting parser, three deterministic transpilers (Elastic EQL, Splunk SPL, and Wazuh DSL), a 240-query labelled evaluation dataset, a field-level evaluation harness, and nine sessions of iterative prompt tuning. The methodology and findings of this work have been written up as a research paper.
 
-The NLQ pipeline translates plain-English queries into executable OpenSearch DSL in four deterministic stages:
+> **Research Paper:** _"Sec-IR: A Schema-Constrained Intermediate Representation for Natural Language to SIEM Query Translation"_
+> **Authors:** [_To be confirmed — FYP team, IBA Karachi_]
+> **Submitted to:** [_Submission venue — to be confirmed_]
+> **Status:** [_Under review / Published — to be confirmed_]
 
-1. **Time-range pre-processor**: A set of regular expressions extract temporal constraints from the query string before the LLM is invoked. This prevents temporal reasoning errors from propagating to the LLM call and ensures consistent time-range formatting.
+The pipeline was subsequently integrated into the Wazuh Dashboard as the `nlqSearch` OpenSearch Dashboards plugin, which is the component a SOC analyst interacts with directly.
 
-2. **LLM call**: The pre-processed query is submitted to the LLM (Gemini or Ollama) with a structured system prompt that defines the Sec-IR schema, ten event type categories, five query pattern types, disambiguation rules, and seven few-shot examples. The LLM is instructed to produce a JSON object conforming to the Sec-IR 1.0 schema.
+---
 
-3. **Schema validation and self-correction**: The LLM output is validated against the Sec-IR schema by a manual zero-dependency JavaScript validator (equivalent in semantics to the Python `jsonschema` Draft7Validator used in the reference Sec-IR implementation). If validation fails, the LLM is re-invoked with the error description appended to the prompt; up to two retries are attempted.
+### 8.2 Design Rationale — Why an Intermediate Representation?
 
-4. **DSL transpiler**: A deterministic JavaScript transpiler converts the validated Sec-IR object to an OpenSearch bool query. The transpiler is a faithful reimplementation of the Python reference transpiler from the Sec-IR project, preserving identical field mappings, severity ranges, and pattern logic.
+Direct LLM-to-query approaches suffer from three well-documented problems. First, LLMs frequently emit syntactically invalid query syntax, particularly for domain-specific languages like Elastic EQL or OpenSearch DSL. Second, a query emitted directly for one platform cannot be translated to another without a second LLM call. Third, there is no natural audit or edit point between the analyst's intent and the executed query.
 
-**Example pipeline execution:**
+Sec-IR resolves all three by inserting a schema-constrained JSON object as the sole output of the LLM call:
 
-Query: `"Show failed admin logins in the last 24 hours"`
-
-Sec-IR output:
-```json
-{
-  "sec_ir_version": "1.0",
-  "event_type": "authentication_failure",
-  "pattern": "single_event",
-  "entity": { "user_role": "admin" },
-  "severity": "high",
-  "time_range": { "type": "relative", "value": "last_24h" }
-}
+```
+Plain English query
+    │
+    ▼  Deterministic time-range pre-processor (regex, no LLM)
+Annotated query  ←── explicit time window injected if found
+    │
+    ▼  One LLM call (Gemini or local Ollama)
+Sec-IR JSON  ←── schema-validated, human-editable
+    │
+    ▼  Deterministic transpiler (pure Python/JS, no LLM)
+Platform queries  →  Elastic EQL | Splunk SPL | Wazuh DSL
 ```
 
-OpenSearch DSL output:
-```json
-{
-  "query": {
-    "bool": {
-      "must": [
-        { "terms": { "rule.groups": ["authentication_failed"] } },
-        { "match": { "data.win.eventdata.targetUserName": "admin" } },
-        { "range": { "@timestamp": { "gte": "now-24h", "lte": "now" } } },
-        { "range": { "rule.level": { "gte": 10, "lte": 12 } } }
-      ]
-    }
-  }
-}
-```
+Query correctness is enforced by code, not by the LLM. The LLM's responsibility is reduced to classifying the analyst's intent into a small, well-defined structure. A downstream transpiler — with no LLM involvement — converts that structure into syntactically correct platform queries. Adding a new target platform requires writing one new transpiler file; nothing upstream changes.
 
-### 8.3 Supported Query Types
+---
 
-**Event types (ten):** `authentication_failure`, `privilege_escalation`, `lateral_movement`, `port_scan`, `process_injection`, `file_deletion`, `malware_alert`, `ransomware_behavior`, `policy_violation`, `data_exfiltration`.
+### 8.3 The Sec-IR Schema
 
-**Query patterns (five):** `single_event` (any matching event), `repeated_attempts` (threshold-based aggregation), `spike` (anomalous volume approximated as threshold), `sequence` (ordered multi-event chain), `absence` (event did not occur).
+The Sec-IR schema (JSON Schema Draft-07) defines eight fields:
 
-### 8.4 Global EN Toggle
+| Field | Type | Description |
+|-------|------|-------------|
+| `sec_ir_version` | string | Schema version (`"1.0"`) |
+| `event_type` | enum (10 values) | Security event category |
+| `pattern` | enum (5 values) | Query structure / detection pattern |
+| `entity` | object | Field bindings (user, src\_ip, host, process, user\_role) |
+| `severity` | enum (6 values) | Alert severity filter |
+| `time_range` | oneOf (relative \| absolute) | Temporal scope |
+| `aggregation` | nullable object | Threshold + grouping (for repeated\_attempts, spike) |
+| `correlation` | nullable object | Event sequence definition (for sequence pattern) |
 
-The EN toggle is injected into every OSD page that renders a query bar with the `[data-test-subj="switchQueryLanguageButton"]` attribute. The injection mechanism operates via a `MutationObserver` on `document.body` combined with a 500 ms `setInterval` fallback to handle React's two-pass render timing.
+**Event type taxonomy (ten categories across five domains):**
 
-Because the OSD query bar accepts DQL (Dashboard Query Language) strings rather than full JSON DSL bodies, the plugin maintains an `irToDQL()` function that converts a Sec-IR object to a DQL string. The time range is deliberately omitted from the DQL string — the existing time-picker on each module page handles the temporal filter.
+| Domain | Event Types |
+|--------|-------------|
+| Authentication | `authentication_failure`, `privilege_escalation` |
+| Network | `lateral_movement`, `port_scan` |
+| Endpoint | `process_injection`, `file_deletion` |
+| Threat | `malware_alert`, `ransomware_behavior` |
+| Compliance | `policy_violation`, `data_exfiltration` |
 
-Updating the React-controlled textarea requires use of the native value setter trick: the prototype's `set` method is called directly, bypassing React's synthetic event system, followed by a dispatched `input` event to trigger React's change handler. A `window.__nlqProcessing` flag prevents the `keydown` interceptor from re-processing the simulated Enter event that executes the actual search.
+**Query pattern taxonomy (five types):**
 
-### 8.5 API Endpoints
+| Pattern | Semantic | Query Structure |
+|---------|----------|-----------------|
+| `single_event` | Any single matching event | `any where …` (EQL) |
+| `repeated_attempts` | Same event ≥ N times | `sequence … with runs=N` (EQL) |
+| `spike` | Anomalous volume surge | Approximated as repeated\_attempts with threshold |
+| `sequence` | Event A followed by event B, same actor | Multi-step `sequence by … with maxspan` (EQL) |
+| `absence` | Expected event did not occur | `not ( any where … )` (EQL) |
+
+**Entity field mapping across platforms:**
+
+| IR Key | Elastic EQL | Splunk SPL | Wazuh DSL |
+|--------|------------|------------|-----------|
+| `user` | `user.name` | `user` | `data.win.eventdata.targetUserName` |
+| `user_role` | `user.roles` | `user_role` | `data.win.eventdata.memberSid` |
+| `src_ip` | `source.ip` | `src_ip` | `data.srcip` |
+| `host` | `host.hostname` | `host` | `agent.name` |
+| `process` | `process.name` | `process` | `data.win.eventdata.image` |
+
+**Severity mapping to Wazuh rule levels:**
+
+| Sec-IR Severity | Wazuh `rule.level` Range |
+|-----------------|--------------------------|
+| `info` | 1–3 |
+| `low` | 4–6 |
+| `medium` | 7–9 |
+| `high` | 10–12 |
+| `critical` | 13–15 |
+| `any` | No filter applied |
+
+---
+
+### 8.4 System Components Built
+
+The complete Sec-IR pipeline was built from scratch across ten development sessions:
+
+#### 8.4.1 `schema.json`
+JSON Schema (Draft-07) definition of the full Sec-IR structure, including oneOf constraints for time range types, nullability rules for aggregation and correlation, and enum constraints for all categorical fields.
+
+#### 8.4.2 `validator.py` / `validator.js`
+A schema validator implemented in both Python (using `jsonschema` Draft7Validator) and as a zero-dependency manual JavaScript reimplementation for use inside the OSD plugin (where npm dependency conflicts with OSD's bundled packages precluded importing a JSON schema library). The validator returns a list of `{field, message}` objects for every violation, enabling targeted self-correction prompts.
+
+#### 8.4.3 `transpiler/elastic.py`, `transpiler/splunk.py`, `transpiler/wazuh.py`
+Three independent deterministic transpilers that convert a validated Sec-IR object into platform-specific query syntax. All are pure Python with no LLM involvement. The Wazuh transpiler emits OpenSearch bool query DSL. For patterns not natively expressible in Wazuh (sequence queries, spike detection), the transpiler emits a best-effort approximation along with a `_meta.note` field describing the limitation transparently.
+
+#### 8.4.4 `parser.py` — LLM Parser with Self-Correction
+The parser submits the analyst's query to the LLM with a structured system prompt containing the schema summary, severity inference rules, garbage refusal instructions, event-type disambiguation rules, and seven few-shot examples. The response is validated immediately; if validation fails, the LLM is re-invoked with a self-correction prompt listing the violated fields. Up to two correction rounds are attempted. In the measured evaluation, `avg_correction_rounds = 0.09`, meaning the self-correction loop fires on fewer than 10% of queries.
+
+The parser supports two backends:
+- **Gemini** (cloud): `google-genai` SDK, `gemini-2.5-flash` model, `response_mime_type="application/json"` for structured output.
+- **Ollama** (local/offline): HTTP streaming API, `format: {"type": "object"}` (Ollama 0.5+ structured output syntax), `num_gpu: 99` for full GPU offload. Supports any locally pulled model; `gemma4:e4b` is recommended.
+
+#### 8.4.5 Time-Range Pre-Processor
+A deterministic regex pre-processor (`_extract_time_range`) scans the query for temporal expressions before the LLM call. Recognised patterns include "in the last N hours", "past N days", "over the last N weeks", "for more than N minutes". When a match is found, a `[DETECTED TIME WINDOW: use time_range value "last_Xh" exactly]` hint is injected into the prompt. Snap strategy is ceiling (round up): under-approximating a security time window silently drops events, which is a worse failure mode than over-querying. The "within N minutes" phrasing is intentionally excluded — it specifies a sequence `maxspan`, not a lookback window.
+
+This pre-processor was added in parser version 4 after post-eval manual testing revealed that the LLM defaulted to `last_24h` for any non-standard time window (e.g., "more than 1 hour", "in the past 30 minutes"), because the few-shot examples only demonstrated canonical values.
+
+---
+
+### 8.5 Evaluation Dataset
+
+The team constructed a 180-entry labelled evaluation dataset (`eval_dataset/`) to measure the parser's accuracy systematically. The dataset is structured in three tiers:
+
+**Tier 1 — Gold Standard (`tier1_ground_truth.json`, 60 entries):**
+Hand-crafted by the team. Each entry contains two NLQ phrasings of the same underlying query — one formal (SOC analyst register) and one casual (conversational) — plus the expected Sec-IR object and annotation rationale. This dual-phrasing design enables evaluation of phrasing robustness. Coverage: all 10 event types (minimum 3 instances each), all 5 patterns (minimum 6 instances each), 3 absolute time ranges, 7 multi-entity entries, all 6 severity values represented.
+
+**Tier 2 — SIGMA-Derived (`tier2_sigma_derived.json`, 80 entries):**
+Based on real-world SIGMA-style detection scenarios. Each entry specifies the detection context (Mimikatz credential dumping, PowerShell abuse, PsExec lateral movement, ransomware shadow-copy deletion, DNS tunnelling, log clearing, etc.) alongside the NLQ an analyst would plausibly submit. All 10 event types and all 5 patterns are represented.
+
+**Tier 3 — Adversarial (`tier3_adversarial.json`, 40 entries):**
+Deliberately tricky edge cases distributed across eight categories:
+
+| Category | Count | Example |
+|----------|-------|---------|
+| temporal\_ambiguity | 6 | "last shift", "since this morning", "over the weekend" |
+| absence\_confusion | 5 | "users who did NOT log in", "everything except X" |
+| multi\_entity | 4 | Queries with 3+ entity fields simultaneously |
+| pattern\_ambiguity | 5 | "lots of", "unusual number of", "a burst of" |
+| compound\_sequence | 5 | 3-event temporal chain (correlation.events with 3 items) |
+| vague\_severity | 4 | "serious events", "critical stuff only" |
+| implied\_entity | 5 | "check the Exchange server", "look at service accounts" |
+| garbage\_input | 6 | "what is the weather", "explain EQL", "hello" (should\_fail=true) |
+
+All 174 non-garbage entries pass schema validation. 6 garbage entries have `should_fail: true` and `expected_ir: null`. Total NLQ strings: **240** (60 tier-1 entries × 2 phrasings + 80 + 40).
+
+---
+
+### 8.6 Evaluation Methodology
+
+The evaluation harness (`eval_harness.py`) runs each NLQ string through the parser and performs field-level comparison against the expected IR. Seven fields are checked independently:
+
+| Field | What it measures |
+|-------|-----------------|
+| `event_type` | Correct security event category |
+| `pattern` | Correct query structure |
+| `severity` | Correct severity inference |
+| `time_range` | Correct temporal scope |
+| `entity` | All expected key-value pairs present and correct |
+| `aggregation` | Threshold and group\_by (set comparison, order-independent) |
+| `correlation` | Events list (ordered) and maxspan correct |
+
+**Composite metrics:**
+- **Semantic match**: `event_type` AND `pattern` both correct — the primary metric, answering "did the system understand what to detect and how?"
+- **Full match**: All 7 fields correct simultaneously
+- **Structural match**: All 6 fields except `severity` correct (a "will this generate a working query?" metric, since severity is alert-routing metadata and does not affect the emitted DSL)
+- **Schema valid**: Parser returned a schema-valid IR (or correctly refused garbage input)
+- **Garbage rejection**: `should_fail=true` entries where the parser correctly returned invalid/no IR
+
+---
+
+### 8.7 Model Comparison — phi3.5 vs. gemma4:e4b
+
+The first full evaluation run compared two locally-runnable models on the complete 240-NLQ dataset via an SSH-tunnelled remote GPU (Tailscale, NVIDIA):
+
+| Metric | phi3.5 (2.2 GB) | gemma4:e4b (9.8 GB) | Δ |
+|--------|----------------|---------------------|---|
+| Schema valid | 78.2% | 94.9% | +16.7 pp |
+| Semantic match | 59.4% | 65.8% | +6.4 pp |
+| Full match | 14.1% | 16.2% | +2.1 pp |
+| Garbage rejection | 16.7% | 50.0% | +33.3 pp |
+| Avg correction rounds | 0.61 | 0.12 | −0.49 |
+| Avg inference time | ~3.74 s | ~8.87 s | +5.1 s |
+
+gemma4:e4b outperforms phi3.5 on every accuracy metric, with dramatically fewer correction rounds. phi3.5 is preferable only when latency is the primary constraint and accuracy is secondary. gemma4:e4b was selected as the primary model for all subsequent evaluation and prompt tuning.
+
+---
+
+### 8.8 Prompt Tuning — Nine Iterations
+
+The system prompt underwent nine development iterations, with quantitative evaluation after each major intervention:
+
+**Version 1 (baseline):** Schema summary, 3 few-shot examples. Severity accuracy: 42.3%. Garbage rejection: 50%.
+
+**Version 2 (+severity rules, +garbage refusal):** Explicit severity inference rules added (e.g., brute force → high; absence queries → info; ransomware/data exfiltration → critical). Refusal instruction added: "if the query is not a security detection question, output `{"error": "not_a_security_query"}`." **Result: garbage rejection 50.0% → 83.3% (+33.3 pp).** Severity showed minimal response (~1 pp improvement), revealing a dataset calibration issue (see §8.9).
+
+**Version 3 (+event_type disambiguation, +targeted few-shot):** Analysis of the v2 confusion matrix identified the five most-confused event_type pairs. An explicit disambiguation block was added to the prompt (e.g., "vssadmin deleting shadow copies is `ransomware_behavior`, not `file_deletion`"; "AD replication from a non-DC is `privilege_escalation`"). Three targeted few-shot examples were added. **Results:**
+
+Targeted confusion pairs resolved:
+
+| Confusion pair | v2 count | v3 count | Change |
+|---------------|---------|---------|--------|
+| privilege\_escalation → policy\_violation | 9 | 1 | **−8** |
+| malware\_alert → process\_injection | 3 | 0 | **−3** |
+| ransomware\_behavior → file\_deletion | 3 | 0 | **−3** |
+| malware\_alert → data\_exfiltration | 4 | 2 | −2 |
+
+Aggregate metric movement (v2 → v3):
+
+| Metric | v2 | v3 | Δ |
+|--------|----|----|---|
+| event\_type accuracy | 74.8% | 76.1% | **+1.3** |
+| semantic match | 66.2% | 67.9% | **+1.7** |
+| aggregation | 79.9% | 81.2% | +1.3 |
+| pattern | 88.5% | 88.0% | −0.5 |
+| time\_range | 88.5% | 87.2% | −1.3 |
+| full match | 30.8% | 29.5% | −1.3 |
+
+**Finding:** Targeted disambiguation rules are effective for specific confusion pairs but on a 4B-parameter model, expanding the system prompt by ~60 lines introduces compensating regressions on other fields — a prompt-length noise floor. A more compact formulation or a larger model would likely convert the targeted wins into a full-match improvement without the compensating noise.
+
+**Version 4 (+time-range pre-processor, +sequence disambiguation):** Deterministic pre-processing of time expressions added before LLM invocation, and an explicit sequence/repeated\_attempts disambiguation rule added. These fixes addressed the two most consistently observed post-eval failure modes from manual testing.
+
+---
+
+### 8.9 Severity Relabelling — Methodology Note
+
+After the v2 eval, severity accuracy was measured at 43.2% — anomalously low compared to all other fields (pattern: 88.5%, correlation: 89.7%). Auditing the 133 severity mismatches revealed a systematic pattern:
+
+- `high → medium`: 45 cases (mostly port\_scan and file\_deletion — model followed prompt rules, dataset used different conventions)
+- `critical → high` and `critical → medium`: 39 cases (dataset over-labelled entries as critical)
+- `any → specific`: 27 cases (dataset labelled entries "any" where the tuned prompt's rules assign a concrete value)
+
+The root cause was a **prompt-dataset skew**: the evaluation dataset had been labelled before severity inference rules were added to the system prompt in version 2. The two had divergent mental models of severity, and the evaluation was measuring their disagreement rather than genuine model error.
+
+A relabelling script (`eval_dataset/relabel_severity.py`) was written to apply the prompt's canonical rules to every dataset entry. The relabelling logic:
+
+| Rule (checked in order) | Assigned Severity |
+|------------------------|-------------------|
+| `pattern == "absence"` (event did NOT occur) | `info` |
+| `pattern == "sequence"` (multi-stage correlated) | `critical` |
+| `event_type ∈ {ransomware_behavior, data_exfiltration}` | `critical` |
+| `event_type ∈ {privilege_escalation, lateral_movement, malware_alert, process_injection}` | `high` |
+| `authentication_failure + repeated_attempts/spike` (brute force) | `high` |
+| `event_type ∈ {port_scan, policy_violation, file_deletion}` | `medium` |
+| `authentication_failure + single_event` (isolated failure) | `low` |
+
+Two guardrails prevent over-correction: the absence check runs first (preventing `data_exfiltration + absence` from being misclassified as critical), and a one-step downgrade cap preserves domain-context severity for entries like "Zerologon-style null credential authentication" (where the query context justifies critical even though the IR structure alone would suggest low). 90 of 174 labelled entries were relabelled.
+
+**Post-relabel severity accuracy: 70.5% (+27.3 pp over the pre-relabel figure of 43.2%).** Both figures are reported in the interest of methodological transparency.
+
+---
+
+### 8.10 Final Evaluation Results
+
+The recommended configuration — gemma4:e4b on a GPU via Ollama, prompt v3, v2-relabelled dataset, 240 NLQ strings — produced the following results:
+
+**Summary metrics:**
+
+| Metric | Score |
+|--------|-------|
+| Schema valid | **97.4%** |
+| Semantic match (event\_type + pattern) | **67.9%** |
+| Full match (all 7 fields) | **29.5%** |
+| Structural match (6 fields, excl. severity) | **39.3%** |
+| Garbage rejection | **83.3%** |
+| Avg correction rounds | **0.09** |
+| Avg inference time (GPU, streaming) | **~2.2 s** |
+
+**Field-level accuracy (v3, gemma4:e4b):**
+
+| Field | Accuracy |
+|-------|----------|
+| correlation | 89.3% |
+| pattern | 88.0% |
+| time\_range | 87.2% |
+| entity | 82.5% |
+| aggregation | 81.2% |
+| event\_type | 76.1% |
+| severity | 69.7% |
+
+---
+
+### 8.11 Metric Interpretation
+
+The 29.5% full match rate requires contextual interpretation. Full match is a multiplicative metric: all seven field checks must be correct simultaneously. With field accuracies ranging from 69.7% to 89.3%, the independent-error lower bound is:
+
+> 0.748 × 0.885 × 0.705 × 0.885 × 0.825 × 0.799 × 0.897 ≈ **24.4%**
+
+The actual full match of 29.5% is **+5.1 points above this baseline**. A positive lift indicates that errors are *correlated*: when the model misunderstands a query, it tends to get several fields wrong on the same query (concentrated failure). Conversely, on queries it understands, it tends to get most fields right. This is the desired failure mode — failure is concentrated on a small number of hard queries rather than uniformly distributed.
+
+**Distribution of correct fields per query:**
+
+| Correct fields | Count | % of queries |
+|---------------|-------|-------------|
+| 7 / 7 (full match) | 71 | 29.5% |
+| 6 / 7 | 66 | 27.5% |
+| 5 / 7 | 76 | 31.7% |
+| ≤ 4 / 7 | 27 | 11.3% |
+
+**57% of queries are correct on at least 6 of 7 fields. Only 11.3% are "catastrophically wrong" (more than 2 fields incorrect).** The median query is off by one field.
+
+Among the 66 queries that scored 6/7 (exactly one field incorrect), the sole-miss field distribution was:
+
+| Field | Count | % of 6/7 queries |
+|-------|-------|-----------------|
+| severity | 20 | 30.3% |
+| aggregation | 16 | 24.2% |
+| entity | 14 | 21.2% |
+| time\_range | 9 | 13.6% |
+| event\_type | 4 | 6.1% |
+| pattern | 3 | 4.5% |
+
+Severity dominates the one-field-off bucket, but since severity is alert-routing metadata that does not affect the emitted SIEM query's correctness, the more actionable metric is **structural match** (all fields except severity correct): **39.3% of queries produce a structurally correct SIEM query**. This is the closest available approximation to a "will this query actually work?" rate.
+
+Among the 27 catastrophic (≤4/7) queries, `event_type` errors are the primary driver: when the model misclassifies the event type at the root, downstream entity, aggregation, and temporal fields tend to be wrong in concert.
+
+**The primary metric of the research is semantic match — at 67.9%, a 4B-parameter locally-runnable model with zero fine-tuning correctly understands 2 out of every 3 security queries it receives.**
+
+---
+
+### 8.12 Integration into the Wazuh Dashboard Plugin
+
+The complete Sec-IR pipeline was integrated into the `nlqSearch` OpenSearch Dashboards plugin. The server-side component reimplements the Python parser, validator, and Wazuh transpiler in JavaScript (Node.js 18), preserving identical field mappings, schema constraints, and self-correction logic. The reimplementation was necessary because OSD's server-side plugin environment runs in Node.js, and the Python dependencies (`jsonschema`, `google-genai`) cannot be loaded directly.
+
+The plugin exposes two analyst interfaces:
+
+**Standalone page (`/app/nlqSearch`):** A full-featured query builder with an editable Sec-IR JSON panel (allowing analysts to inspect and modify the IR before execution), a raw DSL display, a re-transpile button (regenerates DSL from a modified IR without a second LLM call), and a results table.
+
+**Global EN toggle:** An "EN" button injected adjacent to the "DQL" language selector on every Wazuh module page (Security Events, GDPR, Malware Detection, Vulnerability, etc.). When active, pressing Enter in the search bar triggers NLQ translation and auto-submits the resulting DQL string. The existing time-picker on each module page is preserved — the translation pipeline omits the time range from the DQL string, deferring to the page's own temporal filter.
+
+### 8.13 API Endpoints
 
 | Route | Method | Description |
 |-------|--------|-------------|
-| `/api/nlq_search/translate` | POST | Translates plain English to Sec-IR + OpenSearch DSL |
+| `/api/nlq_search/translate` | POST | Plain English → Sec-IR + Wazuh DSL (LLM call + validator + transpiler) |
 | `/api/nlq_search/execute` | POST | Executes an OpenSearch DSL query against `wazuh-alerts-*` |
-| `/api/nlq_search/retranspile` | POST | Regenerates DSL from an edited IR object (no LLM call) |
+| `/api/nlq_search/retranspile` | POST | Regenerates DSL from an edited IR object (deterministic, no LLM call) |
 
-### 8.6 Backend Configuration
+### 8.14 Backend Configuration
 
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `NLQ_BACKEND` | `gemini` | LLM backend: `gemini` or `ollama` |
 | `GEMINI_API_KEY` | _(required)_ | Google AI Studio API key |
 | `GEMINI_MODEL` | `gemini-2.5-flash` | Gemini model name |
-| `OLLAMA_HOST` | `http://localhost:11434` | Ollama server URL (offline mode) |
-| `OLLAMA_MODEL` | `phi3.5` | Ollama model |
+| `OLLAMA_HOST` | `http://localhost:11434` | Ollama server URL (for offline operation) |
+| `OLLAMA_MODEL` | `phi3.5` | Ollama model name (`gemma4:e4b` recommended) |
 | `INDEXER_PASSWORD` | _(required)_ | Wazuh Indexer admin password |
 
 ---

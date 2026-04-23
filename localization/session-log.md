@@ -123,3 +123,48 @@ journalctl -u wazuh-dashboard --no-pager | grep -i localization | tail -20
 - Dynamic strings (e.g. "42 agent(s) – last updated 14:32") are NOT translated because they're concatenated with runtime data. Only static standalone strings are replaced.
 - If an OSD page uses shadow DOM or iframes, translations won't apply inside them (none of our plugins do this).
 - MutationObserver may not catch text set via `element.innerHTML` with embedded HTML tags; only bare text nodes are targeted.
+
+---
+
+## 2026-04-23 — Dark mode CSS fixes + default theme reset to light
+
+### Issues addressed
+
+1. **euiBetaBadge white background in dark mode** — section category headings on the Wazuh overview page ("Threat intelligence", "Security operations", etc.) rendered with a white background and grey text instead of dark-themed colours when dark mode was active. The `DARK_CSS` block had `euiBadge` styles but no rules for `euiBetaBadge` / `euiBetaBadge--hollow`.
+
+2. **euiBreadcrumbWall blue background in dark mode** — the breadcrumb wrapper bar showed a distracting blue background in dark mode. `DARK_CSS` had colour rules for `euiBreadcrumb` text but no background reset for the wrapper elements.
+
+3. **Dark mode active by default** — `localStorage` contained `fyp_theme: 'dark'` from prior testing. Because `loadPreferences()` read that key unconditionally, every fresh page load started in dark mode. Default intent is light mode.
+
+### Fixes applied
+
+**`DARK_CSS` additions (in `public/index.js`):**
+```css
+/* EUI BetaBadge */
+.euiBetaBadge { background-color: #1e293b !important; color: #94a3b8 !important; border-color: #334155 !important; }
+.euiBetaBadge--hollow { background-color: transparent !important; border: 1px solid #475569 !important; color: #94a3b8 !important; }
+.euiCard__betaBadgeWrapper .euiBetaBadge { background-color: #1e293b !important; border-color: #334155 !important; color: #94a3b8 !important; }
+
+/* Breadcrumb wrapper */
+.euiBreadcrumbWall { background: transparent !important; }
+.euiBreadcrumbWrapper { background: transparent !important; }
+```
+
+Removed the old `#cv-root, #ng-root, #nlq-root { background: #0d0d1a !important; }` override — plugins are now light-themed, so dark mode CSS applies to them normally when toggled.
+
+**Default theme reset:**
+- `setDarkMode()` now saves to `fyp_theme_v2` instead of `fyp_theme`.
+- `loadPreferences()` reads `fyp_theme_v2`. If absent (first run after this update), it writes `'light'` and starts light — the stale `fyp_theme: 'dark'` value is silently ignored.
+- Going forward, the dark/light toggle still persists via `fyp_theme_v2`.
+
+### Files changed
+
+| File | Change |
+|------|--------|
+| `public/index.js` | `DARK_CSS`: added `euiBetaBadge` + `euiBreadcrumbWall` rules; removed stale plugin-bg override |
+| `public/index.js` | `setDarkMode()`: localStorage key → `fyp_theme_v2` |
+| `public/index.js` | `loadPreferences()`: reads `fyp_theme_v2`; defaults to `'light'` on first run |
+
+### Status
+
+Built, installed, compressed variants regenerated, dashboard restarted. ✓

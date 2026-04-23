@@ -144,9 +144,9 @@ function flashBtn(btn, label, color) {
   btn.style.borderColor = color;
   setTimeout(function() {
     btn.textContent = prev;
-    btn.style.background = 'transparent';
-    btn.style.color = '#98A2B3';
-    btn.style.borderColor = '#69707D';
+    btn.style.background = '#f8f9fa';
+    btn.style.color = '#495057';
+    btn.style.borderColor = '#ced4da';
   }, 2500);
 }
 
@@ -177,10 +177,10 @@ function attachEnButton(langBtn, textarea) {
     'align-items:center',
     'justify-content:center',
     'padding:0 9px',
-    'border:1px solid #69707D',
+    'border:1px solid #ced4da',
     'border-radius:3px 0 0 3px',
-    'background:#1D1E24',
-    'color:#98A2B3',
+    'background:#f8f9fa',
+    'color:#495057',
     'font-size:11px',
     'font-weight:700',
     'cursor:pointer',
@@ -224,18 +224,18 @@ function attachEnButton(langBtn, textarea) {
       enBtn.style.borderColor  = '#00BFB3';
       enBtn.title = 'NLQ active — type plain English, press Enter to translate and run';
     } else {
-      enBtn.style.background   = '#1D1E24';
-      enBtn.style.color        = '#98A2B3';
-      enBtn.style.borderColor  = '#69707D';
+      enBtn.style.background   = '#f8f9fa';
+      enBtn.style.color        = '#495057';
+      enBtn.style.borderColor  = '#ced4da';
       enBtn.title = 'NLQ: type plain English, press Enter to translate and search';
     }
   }
 
   enBtn.addEventListener('mouseenter', function() {
-    if (!nlqMode) enBtn.style.background = '#2c2d38';
+    if (!nlqMode) enBtn.style.background = '#e9ecef';
   });
   enBtn.addEventListener('mouseleave', function() {
-    if (!nlqMode) enBtn.style.background = '#1D1E24';
+    if (!nlqMode) enBtn.style.background = '#f8f9fa';
   });
 
   enBtn.addEventListener('click', function(e) {
@@ -289,9 +289,9 @@ function attachEnButton(langBtn, textarea) {
         enBtn.style.color = '#fff';
         setTimeout(function() {
           enBtn.textContent = 'EN';
-          enBtn.style.background = '#1D1E24';
-          enBtn.style.color = '#98A2B3';
-          enBtn.style.borderColor = '#69707D';
+          enBtn.style.background = '#f8f9fa';
+          enBtn.style.color = '#495057';
+          enBtn.style.borderColor = '#ced4da';
         }, 800);
 
         /* Auto-submit the translated DQL */
@@ -380,8 +380,8 @@ function escHtml(str) {
 function mountApp(params) {
   var el = params.element;
   el.style.cssText =
-    'width:100%;height:100%;display:flex;flex-direction:column;' +
-    'background:#0d0d1a;color:#eee;font-family:Inter,sans-serif;overflow:auto;box-sizing:border-box;';
+    'width:100%;min-height:100vh;display:flex;flex-direction:column;' +
+    'background:#f8fafc;color:#1a202c;font-family:Inter,sans-serif;overflow:auto;box-sizing:border-box;';
 
   var state = { mode: 'english', ir: null, wazuhQuery: null, corrRounds: 0, hits: [], total: 0 };
 
@@ -389,24 +389,24 @@ function mountApp(params) {
   var header = document.createElement('div');
   header.style.cssText =
     'display:flex;align-items:center;padding:12px 20px;' +
-    'background:#12122a;border-bottom:1px solid #2a2a4a;flex-shrink:0;gap:12px;';
+    'background:#f1f5f9;border-bottom:1px solid #e2e8f0;flex-shrink:0;gap:12px;';
   header.innerHTML =
-    '<span style="font-size:18px;font-weight:600;color:#4fc3f7;">&#128269; NLQ Search</span>' +
-    '<span style="font-size:12px;color:#666;">Natural Language Query for Wazuh Alerts</span>';
+    '<span style="font-size:18px;font-weight:600;color:#2b6cb0;">&#128269; NLQ Search</span>' +
+    '<span style="font-size:12px;color:#718096;">Natural Language Query for Wazuh Alerts</span>';
   el.appendChild(header);
 
   /* ── Search area ── */
   var searchArea = document.createElement('div');
   searchArea.style.cssText =
-    'padding:16px 20px;background:#12122a;border-bottom:1px solid #2a2a4a;flex-shrink:0;';
+    'padding:16px 20px;background:#f1f5f9;border-bottom:1px solid #e2e8f0;flex-shrink:0;';
 
   var toggleRow = document.createElement('div');
   toggleRow.style.cssText = 'display:flex;align-items:center;gap:8px;margin-bottom:12px;';
   toggleRow.innerHTML =
-    '<span style="font-size:12px;color:#aaa;">Mode:</span>' +
-    '<div style="display:flex;border:1px solid #2a2a4a;border-radius:4px;overflow:hidden;">' +
-      '<button id="nlq-btn-english" style="padding:4px 14px;background:#1e6091;color:#fff;border:none;cursor:pointer;font-size:12px;">English</button>' +
-      '<button id="nlq-btn-dsl"     style="padding:4px 14px;background:#1a1a2e;color:#aaa;border:none;cursor:pointer;font-size:12px;border-left:1px solid #2a2a4a;">Query Language</button>' +
+    '<span style="font-size:12px;color:#718096;">Mode:</span>' +
+    '<div style="display:flex;border:1px solid #e2e8f0;border-radius:4px;overflow:hidden;">' +
+      '<button id="nlq-btn-english" style="padding:4px 14px;background:#3182ce;color:#fff;border:none;cursor:pointer;font-size:12px;">English</button>' +
+      '<button id="nlq-btn-dsl"     style="padding:4px 14px;background:#e2e8f0;color:#4a5568;border:none;cursor:pointer;font-size:12px;border-left:1px solid #cbd5e0;">Query Language</button>' +
     '</div>';
   searchArea.appendChild(toggleRow);
 
@@ -416,7 +416,7 @@ function mountApp(params) {
   var textarea = document.createElement('textarea');
   textarea.placeholder = 'e.g. Show failed admin logins in the last 24 hours';
   textarea.style.cssText =
-    'flex:1;padding:8px 12px;background:#1a1a2e;color:#eee;border:1px solid #2a2a4a;' +
+    'flex:1;padding:8px 12px;background:#ffffff;color:#1a202c;border:1px solid #e2e8f0;' +
     'border-radius:4px;font-size:13px;resize:vertical;min-height:52px;font-family:inherit;';
   inputRow.appendChild(textarea);
 
@@ -444,7 +444,7 @@ function mountApp(params) {
   /* ── IR area ── */
   var irArea = document.createElement('div');
   irArea.style.cssText =
-    'padding:0 20px;background:#0d0d1a;border-bottom:1px solid #1a1a3a;display:none;';
+    'padding:0 20px;background:#f8fafc;border-bottom:1px solid #e2e8f0;display:none;';
 
   var irSection = document.createElement('div');
   irSection.style.cssText = 'padding:12px 0;';
@@ -453,51 +453,51 @@ function mountApp(params) {
   irHeader.style.cssText =
     'display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;';
   irHeader.innerHTML =
-    '<span style="font-size:13px;font-weight:600;color:#4fc3f7;">Sec-IR (Intermediate Representation)</span>' +
+    '<span style="font-size:13px;font-weight:600;color:#2b6cb0;">Sec-IR (Intermediate Representation)</span>' +
     '<div style="display:flex;gap:6px;">' +
-      '<button id="nlq-ir-toggle" style="padding:2px 10px;background:#1a1a2e;color:#aaa;border:1px solid #2a2a4a;border-radius:3px;cursor:pointer;font-size:11px;">Collapse</button>' +
-      '<button id="nlq-retranspile-btn" style="padding:2px 10px;background:#4a2020;color:#ff9a9a;border:1px solid #6a3030;border-radius:3px;cursor:pointer;font-size:11px;">Re-transpile</button>' +
+      '<button id="nlq-ir-toggle" style="padding:2px 10px;background:#e2e8f0;color:#4a5568;border:1px solid #cbd5e0;border-radius:3px;cursor:pointer;font-size:11px;">Collapse</button>' +
+      '<button id="nlq-retranspile-btn" style="padding:2px 10px;background:#fff5f5;color:#c53030;border:1px solid #fc8181;border-radius:3px;cursor:pointer;font-size:11px;">Re-transpile</button>' +
     '</div>';
   irSection.appendChild(irHeader);
 
   var irNote = document.createElement('div');
-  irNote.style.cssText = 'font-size:11px;color:#666;margin-bottom:6px;';
+  irNote.style.cssText = 'font-size:11px;color:#718096;margin-bottom:6px;';
   irNote.textContent = 'Edit the JSON and click Re-transpile to regenerate DSL without another LLM call.';
   irSection.appendChild(irNote);
 
   var irEditor = document.createElement('textarea');
   irEditor.style.cssText =
-    'width:100%;min-height:180px;padding:10px;background:#0a0a1a;color:#a8ff78;' +
-    'border:1px solid #2a2a4a;border-radius:4px;font-family:monospace;font-size:12px;' +
+    'width:100%;min-height:180px;padding:10px;background:#f8fafc;color:#276749;' +
+    'border:1px solid #e2e8f0;border-radius:4px;font-family:monospace;font-size:12px;' +
     'resize:vertical;box-sizing:border-box;';
   irSection.appendChild(irEditor);
 
   var corrBadge = document.createElement('div');
-  corrBadge.style.cssText = 'font-size:11px;color:#666;margin-top:4px;';
+  corrBadge.style.cssText = 'font-size:11px;color:#718096;margin-top:4px;';
   irSection.appendChild(corrBadge);
 
   irArea.appendChild(irSection);
 
   var dslSection = document.createElement('div');
-  dslSection.style.cssText = 'padding:12px 0;border-top:1px solid #1a1a3a;';
+  dslSection.style.cssText = 'padding:12px 0;border-top:1px solid #e2e8f0;';
 
   var dslHeader = document.createElement('div');
   dslHeader.style.cssText =
     'display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;';
   dslHeader.innerHTML =
-    '<span style="font-size:13px;font-weight:600;color:#4fc3f7;">Generated Wazuh DSL Query</span>' +
-    '<button id="nlq-dsl-toggle" style="padding:2px 10px;background:#1a1a2e;color:#aaa;border:1px solid #2a2a4a;border-radius:3px;cursor:pointer;font-size:11px;">Collapse</button>';
+    '<span style="font-size:13px;font-weight:600;color:#2b6cb0;">Generated Wazuh DSL Query</span>' +
+    '<button id="nlq-dsl-toggle" style="padding:2px 10px;background:#e2e8f0;color:#4a5568;border:1px solid #cbd5e0;border-radius:3px;cursor:pointer;font-size:11px;">Collapse</button>';
   dslSection.appendChild(dslHeader);
 
   var dslDisplay = document.createElement('pre');
   dslDisplay.style.cssText =
-    'padding:10px;background:#0a0a1a;color:#ffd700;border:1px solid #2a2a4a;' +
+    'padding:10px;background:#f8fafc;color:#744210;border:1px solid #e2e8f0;' +
     'border-radius:4px;font-size:12px;overflow:auto;max-height:240px;white-space:pre-wrap;';
   dslSection.appendChild(dslDisplay);
 
   var dqlDisplay = document.createElement('div');
-  dqlDisplay.style.cssText = 'margin-top:8px;font-size:12px;color:#aaa;';
-  dqlDisplay.innerHTML = '<span style="color:#666;">DQL equivalent:</span> <code id="nlq-dql-str" style="color:#7ec8e3;"></code>';
+  dqlDisplay.style.cssText = 'margin-top:8px;font-size:12px;color:#4a5568;';
+  dqlDisplay.innerHTML = '<span style="color:#718096;">DQL equivalent:</span> <code id="nlq-dql-str" style="color:#2b6cb0;"></code>';
   dslSection.appendChild(dqlDisplay);
 
   irArea.appendChild(dslSection);
@@ -506,22 +506,22 @@ function mountApp(params) {
   /* ── DSL direct input area ── */
   var dslInputArea = document.createElement('div');
   dslInputArea.style.cssText =
-    'padding:12px 20px;background:#0d0d1a;border-bottom:1px solid #1a1a3a;display:none;';
+    'padding:12px 20px;background:#f8fafc;border-bottom:1px solid #e2e8f0;display:none;';
   dslInputArea.innerHTML =
-    '<div style="font-size:13px;font-weight:600;color:#4fc3f7;margin-bottom:8px;">Wazuh DSL Query (JSON)</div>';
+    '<div style="font-size:13px;font-weight:600;color:#2b6cb0;margin-bottom:8px;">Wazuh DSL Query (JSON)</div>';
 
   var dslInputEditor = document.createElement('textarea');
   dslInputEditor.placeholder = '{\n  "query": { "bool": { "must": [ ... ] } }\n}';
   dslInputEditor.style.cssText =
-    'width:100%;min-height:180px;padding:10px;background:#0a0a1a;color:#ffd700;' +
-    'border:1px solid #2a2a4a;border-radius:4px;font-family:monospace;font-size:12px;' +
+    'width:100%;min-height:180px;padding:10px;background:#f8fafc;color:#744210;' +
+    'border:1px solid #e2e8f0;border-radius:4px;font-family:monospace;font-size:12px;' +
     'resize:vertical;box-sizing:border-box;';
   dslInputArea.appendChild(dslInputEditor);
   el.appendChild(dslInputArea);
 
-  /* ── Results area ── */
+  /* ── Results area — always visible (flex:1 fills remaining height, fixes whitespace) ── */
   var resultsArea = document.createElement('div');
-  resultsArea.style.cssText = 'padding:16px 20px;flex:1;overflow:auto;display:none;';
+  resultsArea.style.cssText = 'padding:16px 20px;flex:1;overflow:auto;min-height:0;';
   el.appendChild(resultsArea);
 
   /* ── Mode wiring ── */
@@ -531,14 +531,14 @@ function mountApp(params) {
   function setMode(mode) {
     state.mode = mode;
     if (mode === 'english') {
-      btnEnglish.style.background = '#1e6091'; btnEnglish.style.color = '#fff';
-      btnDsl.style.background = '#1a1a2e';     btnDsl.style.color = '#aaa';
+      btnEnglish.style.background = '#3182ce'; btnEnglish.style.color = '#fff';
+      btnDsl.style.background = '#e2e8f0';     btnDsl.style.color = '#4a5568';
       textarea.placeholder = 'e.g. Show failed admin logins in the last 24 hours';
       translateBtn.style.display = '';
       dslInputArea.style.display = 'none';
     } else {
-      btnDsl.style.background = '#1e6091';     btnDsl.style.color = '#fff';
-      btnEnglish.style.background = '#1a1a2e'; btnEnglish.style.color = '#aaa';
+      btnDsl.style.background = '#3182ce';     btnDsl.style.color = '#fff';
+      btnEnglish.style.background = '#e2e8f0'; btnEnglish.style.color = '#4a5568';
       translateBtn.style.display = 'none';
       dslInputArea.style.display = '';
       runBtn.style.display = '';
@@ -662,21 +662,19 @@ function mountApp(params) {
 
     setBusy(runBtn, 'Running…');
     setStatus('Executing query against Wazuh Indexer…');
-    resultsArea.style.display = 'none';
+    resultsArea.innerHTML = '<div style="text-align:center;padding:40px;color:#a0aec0;font-size:13px;">Running query…</div>';
 
     postJSON('/api/nlq_search/execute', { wazuh_query: queryToRun })
       .then(function(data) {
         setReady(runBtn);
         state.hits = data.hits || []; state.total = data.total || 0;
         renderResults(state.hits, state.total, data.index);
-        resultsArea.style.display = '';
         setStatus(state.total + ' match(es) — showing ' + state.hits.length);
       })
       .catch(function(err) {
         setReady(runBtn);
         setStatus('Query execution failed: ' + err.message, 'error');
-        resultsArea.innerHTML = '<div style="color:#ff6b6b;padding:10px;">Error: ' + escHtml(err.message) + '</div>';
-        resultsArea.style.display = '';
+        resultsArea.innerHTML = '<div style="color:#c53030;padding:10px;">Error: ' + escHtml(err.message) + '</div>';
       });
   }
 
@@ -685,18 +683,18 @@ function mountApp(params) {
     var summary = document.createElement('div');
     summary.style.cssText =
       'display:flex;align-items:center;justify-content:space-between;' +
-      'margin-bottom:12px;padding-bottom:8px;border-bottom:1px solid #1a1a3a;';
+      'margin-bottom:12px;padding-bottom:8px;border-bottom:1px solid #e2e8f0;';
     summary.innerHTML =
-      '<span style="font-size:14px;font-weight:600;color:#4fc3f7;">Results</span>' +
-      '<span style="font-size:12px;color:#888;">' +
+      '<span style="font-size:14px;font-weight:600;color:#2b6cb0;">Results</span>' +
+      '<span style="font-size:12px;color:#718096;">' +
         total.toLocaleString() + ' total &nbsp;|&nbsp; showing ' + hits.length +
-        ' &nbsp;|&nbsp; index: <code style="color:#aaa;">' + escHtml(index || 'wazuh-alerts-*') + '</code>' +
+        ' &nbsp;|&nbsp; index: <code style="color:#4a5568;">' + escHtml(index || 'wazuh-alerts-*') + '</code>' +
       '</span>';
     resultsArea.appendChild(summary);
 
     if (hits.length === 0) {
       var empty = document.createElement('div');
-      empty.style.cssText = 'text-align:center;padding:40px;color:#555;font-size:14px;';
+      empty.style.cssText = 'text-align:center;padding:40px;color:#a0aec0;font-size:14px;';
       empty.textContent = 'No matching alerts found.';
       resultsArea.appendChild(empty);
       return;
@@ -707,32 +705,32 @@ function mountApp(params) {
     var table = document.createElement('table');
     table.style.cssText = 'width:100%;border-collapse:collapse;font-size:12px;';
     table.innerHTML =
-      '<thead><tr style="background:#12122a;color:#aaa;text-align:left;">' +
-      '<th style="padding:8px 10px;border-bottom:1px solid #2a2a4a;min-width:160px;">Timestamp</th>' +
-      '<th style="padding:8px 10px;border-bottom:1px solid #2a2a4a;">Agent</th>' +
-      '<th style="padding:8px 10px;border-bottom:1px solid #2a2a4a;min-width:300px;">Rule Description</th>' +
-      '<th style="padding:8px 10px;border-bottom:1px solid #2a2a4a;">Level</th>' +
-      '<th style="padding:8px 10px;border-bottom:1px solid #2a2a4a;">Rule ID</th>' +
-      '<th style="padding:8px 10px;border-bottom:1px solid #2a2a4a;">Groups</th>' +
+      '<thead><tr style="background:#f1f5f9;color:#4a5568;text-align:left;">' +
+      '<th style="padding:8px 10px;border-bottom:1px solid #e2e8f0;min-width:160px;">Timestamp</th>' +
+      '<th style="padding:8px 10px;border-bottom:1px solid #e2e8f0;">Agent</th>' +
+      '<th style="padding:8px 10px;border-bottom:1px solid #e2e8f0;min-width:300px;">Rule Description</th>' +
+      '<th style="padding:8px 10px;border-bottom:1px solid #e2e8f0;">Level</th>' +
+      '<th style="padding:8px 10px;border-bottom:1px solid #e2e8f0;">Rule ID</th>' +
+      '<th style="padding:8px 10px;border-bottom:1px solid #e2e8f0;">Groups</th>' +
       '</tr></thead>';
 
     var tbody = document.createElement('tbody');
     hits.forEach(function(hit, i) {
       var src = hit._source || {}, agent = src.agent || {}, rule = src.rule || {};
       var tr = document.createElement('tr');
-      tr.style.cssText = 'border-bottom:1px solid #1a1a3a;background:' + (i % 2 === 0 ? '#0d0d1a' : '#101020') + ';';
+      tr.style.cssText = 'border-bottom:1px solid #e2e8f0;background:' + (i % 2 === 0 ? '#ffffff' : '#f7fafc') + ';';
       var ts = src['@timestamp'] ? new Date(src['@timestamp']).toLocaleString() : '—';
       var lvl = rule.level != null ? rule.level : '—';
       var grps = Array.isArray(rule.groups) ? rule.groups.join(', ') : (rule.groups || '—');
       tr.innerHTML =
-        '<td style="padding:7px 10px;color:#888;">' + escHtml(ts) + '</td>' +
-        '<td style="padding:7px 10px;color:#ddd;">' + escHtml(agent.name || agent.id || '—') + '</td>' +
-        '<td style="padding:7px 10px;color:#ddd;">' + escHtml(rule.description || '—') + '</td>' +
+        '<td style="padding:7px 10px;color:#718096;">' + escHtml(ts) + '</td>' +
+        '<td style="padding:7px 10px;color:#2d3748;">' + escHtml(agent.name || agent.id || '—') + '</td>' +
+        '<td style="padding:7px 10px;color:#2d3748;">' + escHtml(rule.description || '—') + '</td>' +
         '<td style="padding:7px 10px;"><span style="padding:2px 7px;border-radius:3px;font-weight:600;background:' +
           severityColor(lvl) + '22;color:' + severityColor(lvl) + ';border:1px solid ' +
           severityColor(lvl) + '44;">' + escHtml(String(lvl)) + '</span></td>' +
-        '<td style="padding:7px 10px;color:#888;">' + escHtml(String(rule.id || '—')) + '</td>' +
-        '<td style="padding:7px 10px;color:#666;font-size:11px;">' + escHtml(grps) + '</td>';
+        '<td style="padding:7px 10px;color:#718096;">' + escHtml(String(rule.id || '—')) + '</td>' +
+        '<td style="padding:7px 10px;color:#a0aec0;font-size:11px;">' + escHtml(grps) + '</td>';
       tbody.appendChild(tr);
     });
     table.appendChild(tbody);

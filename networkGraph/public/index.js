@@ -45,7 +45,7 @@ var COLOR_HIGH    = '#d4371c';  // Red    — rule.level ≥ 12
 var COLOR_MANAGER   = '#006BB4';  // Blue — manager node fill
 var COLOR_ACTIVE    = '#017D73';  // Teal — active agent circle border
 var COLOR_INACTIVE  = '#6a6a6a';  // Grey — disconnected agent circle border
-var COLOR_NODE_FILL = '#1a1a2e';  // Dark — agent node interior fill
+var COLOR_NODE_FILL = '#f1f5f9';  // Light grey — agent node interior fill
 
 /* ─────────────────────────────────────────────────────────────────────────────
    Helper: fetchJSON
@@ -169,7 +169,7 @@ function createGraph(container) {
     .attr('width',   '100%')
     .attr('height',  '100%')
     .attr('viewBox', '0 0 ' + width + ' ' + height)
-    .style('background', '#0d0d1a');
+    .style('background', '#f8fafc');
 
   /* ── SVG arrowhead markers ────────────────────────────────────────────────
      One marker per severity colour.  Used as marker-end on peer (dashed) edges
@@ -220,8 +220,10 @@ function createGraph(container) {
   var tooltip = d3.select(container)
     .append('div')
     .style('position',       'absolute')
-    .style('background',     'rgba(0,0,0,0.85)')
-    .style('color',          '#eee')
+    .style('background',     'rgba(255,255,255,0.97)')
+    .style('color',          '#1a202c')
+    .style('border',         '1px solid #e2e8f0')
+    .style('box-shadow',     '0 2px 8px rgba(0,0,0,0.12)')
     .style('padding',        '8px 12px')
     .style('border-radius',  '4px')
     .style('font-size',      '12px')
@@ -412,7 +414,7 @@ function createGraph(container) {
         .attr('text-anchor',  'middle')
         .attr('dy',           '0.35em')
         .attr('font-size',    '7px')
-        .attr('fill',         '#cccccc')
+        .attr('fill',         '#4a5568')
         .attr('pointer-events', 'none')
         .text(function(d) {
           var os = (d.os || '').toLowerCase();
@@ -430,7 +432,7 @@ function createGraph(container) {
         .attr('text-anchor',  'middle')
         .attr('dy',           '2.5em')
         .attr('font-size',    '10px')
-        .attr('fill',         '#dddddd')
+        .attr('fill',         '#4a5568')
         .attr('pointer-events', 'none');
 
     /* ── Merge enter + update selections ── */
@@ -513,31 +515,29 @@ function createGraph(container) {
 function mountApp(params) {
   var element = params.element;
 
-  /* Full-height flex column matching OSD's dark theme. */
+  /* Full-height flex column — light theme. */
   element.style.cssText =
     'width:100%;height:100%;display:flex;flex-direction:column;' +
-    'background:#0d0d1a;color:#eee;font-family:sans-serif;overflow:hidden;';
+    'background:#f8fafc;color:#1a202c;font-family:sans-serif;overflow:hidden;';
 
   /* ── Header bar ── */
   var header = document.createElement('div');
   header.style.cssText =
     'display:flex;align-items:center;padding:10px 16px;' +
-    'background:#12122a;border-bottom:1px solid #2a2a4a;flex-shrink:0;';
+    'background:#f1f5f9;border-bottom:1px solid #e2e8f0;flex-shrink:0;';
   header.innerHTML =
-    '<span style="font-size:18px;font-weight:600;color:#4fc3f7;">&#9974; Wazuh Network Graph</span>' +
-    // Status text — updated after every fetch (shows agent count + timestamp).
-    '<span id="ng-status" style="margin-left:16px;font-size:12px;color:#888;">Loading…</span>' +
-    // Manual refresh button — triggers fetchData() immediately.
+    '<span style="font-size:18px;font-weight:600;color:#2b6cb0;">&#9974; Wazuh Network Graph</span>' +
+    '<span id="ng-status" style="margin-left:16px;font-size:12px;color:#718096;">Loading…</span>' +
     '<button id="ng-refresh" style="margin-left:auto;padding:4px 12px;' +
-    'background:#1e6091;color:#fff;border:none;border-radius:4px;cursor:pointer;">Refresh</button>';
+    'background:#3182ce;color:#fff;border:none;border-radius:4px;cursor:pointer;">Refresh</button>';
   element.appendChild(header);
 
   /* ── Legend ──
      Explains edge colours and node types so users can read the graph at a glance. */
   var legend = document.createElement('div');
   legend.style.cssText =
-    'display:flex;gap:16px;padding:6px 16px;background:#0d0d1a;' +
-    'font-size:11px;flex-shrink:0;border-bottom:1px solid #1a1a3a;';
+    'display:flex;gap:16px;padding:6px 16px;background:#f8fafc;' +
+    'font-size:11px;flex-shrink:0;border-bottom:1px solid #e2e8f0;color:#4a5568;';
   legend.innerHTML =
     // Edge colour key
     '<span><span style="display:inline-block;width:14px;height:3px;background:' + COLOR_NONE   + ';vertical-align:middle;margin-right:4px;"></span>No alerts</span>' +

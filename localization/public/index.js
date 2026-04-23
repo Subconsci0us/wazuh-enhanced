@@ -74,6 +74,8 @@ var DARK_CSS = [
   '.euiHeaderLink:hover { color: #e2e8f0 !important; background: #1e293b !important; }',
   '.euiBreadcrumb { color: #94a3b8 !important; }',
   '.euiBreadcrumb--last, .euiBreadcrumb--last a { color: #e2e8f0 !important; }',
+  '.euiBreadcrumbWall { background: transparent !important; }',
+  '.euiBreadcrumbWrapper { background: transparent !important; }',
 
   /* EUI Collapsible Nav / Sidebar */
   '.euiCollapsibleNav, .euiCollapsibleNavGroup, .euiCollapsibleNavGroup--light { background: #0d1527 !important; }',
@@ -159,6 +161,12 @@ var DARK_CSS = [
   '.euiBadge--danger { background: #7f1d1d !important; color: #f87171 !important; }',
   '.euiBadge--warning { background: #7c2d12 !important; color: #fb923c !important; }',
 
+  /* EUI BetaBadge — section category labels in the Wazuh overview page */
+  /* ("Threat intelligence", "Security operations", etc.) */
+  '.euiBetaBadge { background-color: #1e293b !important; color: #94a3b8 !important; border-color: #334155 !important; }',
+  '.euiBetaBadge--hollow { background-color: transparent !important; border: 1px solid #475569 !important; color: #94a3b8 !important; }',
+  '.euiCard__betaBadgeWrapper .euiBetaBadge { background-color: #1e293b !important; border-color: #334155 !important; color: #94a3b8 !important; }',
+
   /* EUI Tooltips */
   '.euiToolTip, .euiToolTipPopover { background: #1e293b !important; color: #e2e8f0 !important; border: 1px solid #334155 !important; box-shadow: 0 4px 16px rgba(0,0,0,0.5) !important; }',
   '.euiToolTip__arrow { border-color: #334155 !important; background: #1e293b !important; }',
@@ -212,8 +220,7 @@ var DARK_CSS = [
   '.content-wrapper, .main-wrapper, .app-wrapper, .page-wrapper { background: #0f172a !important; }',
   '[class*="container"]:not(#fyp-toolbar) { background-color: inherit; }',
 
-  /* Ensure our custom plugins remain styled normally — they already have dark backgrounds */
-  '#cv-root, #ng-root, #nlq-root { background: #0d0d1a !important; }',
+  /* Custom plugins use their own inline styles; dark mode applies to them normally */
 ].join('\n');
 
 // ── RTL CSS ───────────────────────────────────────────────────────────────────
@@ -401,7 +408,7 @@ function _syncThemeBtn(btn) {
 
 function setDarkMode(enabled) {
   _dark = enabled;
-  try { localStorage.setItem('fyp_theme', enabled ? 'dark' : 'light'); } catch (_) {}
+  try { localStorage.setItem('fyp_theme_v2', enabled ? 'dark' : 'light'); } catch (_) {}
 
   if (enabled) {
     injectStyle('fyp-dark-mode', DARK_CSS);
@@ -552,12 +559,17 @@ function stopObserver() {
 function loadPreferences() {
   var savedTheme, savedLang;
   try {
-    savedTheme = localStorage.getItem('fyp_theme');
+    savedTheme = localStorage.getItem('fyp_theme_v2');
     savedLang  = localStorage.getItem('fyp_language');
+    // v2 key absent = first run after update; default to light mode
+    if (savedTheme === null) {
+      savedTheme = 'light';
+      localStorage.setItem('fyp_theme_v2', 'light');
+    }
   } catch (_) {}
 
-  if (savedTheme === 'dark')  setDarkMode(true);
-  if (savedLang  === 'ur')    setLanguage('ur');
+  if (savedTheme === 'dark') setDarkMode(true);
+  if (savedLang  === 'ur')   setLanguage('ur');
 }
 
 // ── Navigation-aware visibility ───────────────────────────────────────────────
