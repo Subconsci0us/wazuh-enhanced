@@ -6,8 +6,8 @@ This repository contains everything needed to reproduce a final-year project (FY
 
 1. **Wazuh SIEM** — open-source security information and event management platform (all-in-one deployment: manager, indexer, dashboard).
 2. **PECA compliance rules** — custom Wazuh detection rules mapped to sections of Pakistan's Prevention of Electronic Crimes Act (PECA 2016), covering unauthorised access, data tampering, critical infrastructure protection, and malicious code.
-3. **AI chatbot assistant** — a natural-language security analyst powered by a large language model (Google Gemini, OpenAI GPT, or AWS Bedrock Claude). The chatbot is embedded directly in the Wazuh Dashboard and can answer questions like "Analyze the most important alerts in my environment" or "List critical CVEs."
-4. **NLQ Search** — a Wazuh Dashboard plugin that translates plain-English security queries into Wazuh DSL via the Sec-IR intermediate representation pipeline, then executes them directly against the Wazuh Indexer. Supports Gemini API and local Ollama backends.
+3. **AI chatbot assistant** — a natural-language security analyst powered by a large language model (Groq, Google Gemini, OpenAI GPT, or AWS Bedrock Claude). The chatbot is embedded directly in the Wazuh Dashboard and can answer questions like "Analyze the most important alerts in my environment" or "List critical CVEs."
+4. **NLQ Search** — a Wazuh Dashboard plugin that translates plain-English security queries into Wazuh DSL via the Sec-IR intermediate representation pipeline, then executes them directly against the Wazuh Indexer. Supports Groq API (default), Gemini API, and local Ollama backends.
 
 ---
 
@@ -88,7 +88,7 @@ wazuh-fyp-repo/
 │   ├── public/                       ← browser-side plugin code (vanilla JS UI)
 │   ├── server/                       ← OSD server-side plugin (LLM proxy + transpiler)
 │   │   ├── lib/                      ←   Sec-IR validator + Wazuh DSL transpiler
-│   │   └── llm_backends/             ←   Gemini + Ollama backend implementations
+│   │   └── llm_backends/             ←   Groq + Gemini + Ollama backend implementations
 │   └── target/public/               ← pre-built webpack bundle (ready to install)
 ├── complianceView/
 │   ├── README.md                     ← plugin documentation + route reference
@@ -113,7 +113,8 @@ wazuh-fyp-repo/
 - **Hardware:** minimum 4 vCPU / 8 GB RAM (Wazuh all-in-one + Python services)
 - **Network:** internet access for package downloads
 - **LLM account:** one of:
-  - Google Gemini API key (free tier supported with `gemini-2.5-flash`)
+  - **Groq API key** (recommended — fastest inference, free tier at [console.groq.com](https://console.groq.com/keys))
+  - Google Gemini API key (free tier at [aistudio.google.com](https://aistudio.google.com))
   - OpenAI API key
   - AWS credentials with Bedrock access
 - **Ports (must be open between components):**
@@ -187,7 +188,7 @@ The `aiAssistant` feature is the most involved because it requires external cred
 | Credential | Where to get it |
 |------------|-----------------|
 | Wazuh Indexer admin password | `tar -xOf wazuh-install-files.tar wazuh-passwords.txt` — `admin` user password |
-| LLM API key | Gemini: [aistudio.google.com](https://aistudio.google.com) (free tier) · OpenAI: platform.openai.com · Bedrock: AWS IAM |
+| LLM API key | **Groq** (recommended): [console.groq.com/keys](https://console.groq.com/keys) (free) · Gemini: [aistudio.google.com](https://aistudio.google.com) · OpenAI: platform.openai.com · Bedrock: AWS IAM |
 | A gateway secret | Any strong string you invent (e.g. output of `openssl rand -hex 32`) — used to authenticate calls from OpenSearch to the gateway |
 
 #### What happens when you run `sudo bash setup.sh`
@@ -209,10 +210,14 @@ The `aiAssistant` feature is the most involved because it requires external cred
 
    **Pause 2** — the script opens `/etc/mcp-llm-gateway/mcp-llm-gateway.env` for you to fill in:
    ```
-   # Choose one provider:
-   LLM_PROVIDER=gemini
-   GEMINI_API_KEY=<your-key>
-   GEMINI_MODEL=gemini-2.5-flash
+   # Choose one provider (Groq recommended — fastest, free tier):
+   LLM_PROVIDER=groq
+   GROQ_API_KEY=gsk_xxxxxxxxxxxx
+   GROQ_MODEL=llama-3.3-70b-versatile
+
+   # Alternative: Gemini
+   # LLM_PROVIDER=gemini
+   # GEMINI_API_KEY=<your-key>
 
    # Internal authentication — any secret string you choose:
    GATEWAY_API_KEY=<your-gateway-secret>
@@ -252,8 +257,8 @@ curl -s http://127.0.0.1:9912/health | python3 -m json.tool
 #   "summary": "All components operational.",
 #   "status": { "gateway": "ok", "llm": "ok", "mcp": "ok" },
 #   "details": { "mcp_tools_count": 11 },
-#   "provider": "gemini",
-#   "model": "gemini-2.5-flash"
+#   "provider": "groq",
+#   "model": "llama-3.3-70b-versatile"
 # }
 ```
 
@@ -273,7 +278,15 @@ sudo nano /etc/mcp-llm-gateway/mcp-llm-gateway.env
 
 Set `LLM_PROVIDER` and the matching API key:
 
-**Gemini (recommended — free tier available):**
+**Groq (recommended — fastest inference, generous free tier):**
+```
+LLM_PROVIDER="groq"
+GROQ_API_KEY="gsk_xxxxxxxxxxxxxxxxxxxx"
+GROQ_MODEL="llama-3.3-70b-versatile"
+```
+Get your key at [console.groq.com/keys](https://console.groq.com/keys). Other available models: `llama-3.1-8b-instant` (lower latency), `mixtral-8x7b-32768`, `gemma2-9b-it`.
+
+**Gemini (free tier available):**
 ```
 LLM_PROVIDER="gemini"
 GEMINI_API_KEY="your-gemini-api-key"
@@ -386,7 +399,7 @@ Rules are stored in `rules/peca_rules.xml` and deployed to `/var/ossec/etc/rules
 | Gateway: langchain | 0.3.27 |
 | Gateway: langchain-mcp-adapters | 0.1.9 |
 | Gateway: uvicorn | 0.40.0 |
-| LLM Provider (tested) | Google Gemini (gemini-2.5-flash) |
+| LLM Provider (tested) | Groq (llama-3.3-70b-versatile), Google Gemini (gemini-2.5-flash) |
 
 ---
 
@@ -410,12 +423,38 @@ sudo journalctl -u wazuh-dashboard -f
 
 ## Switching LLM Provider
 
+### AI Assistant (MCP-LLM Gateway)
+
 Edit `/etc/mcp-llm-gateway/mcp-llm-gateway.env`, set `LLM_PROVIDER` and the matching credential(s), then:
 
 ```bash
 sudo systemctl restart mcp-llm-gateway
 curl -s http://127.0.0.1:9912/health
 ```
+
+Supported values for `LLM_PROVIDER`: `groq` · `openai` · `gemini` · `claude_bedrock`.
+
+### NLQ Search Plugin
+
+Edit `/usr/share/wazuh-dashboard/plugins/nlqSearch/server/.env`:
+
+```
+# Groq (default):
+NLQ_BACKEND=groq
+GROQ_API_KEY=gsk_xxxx
+GROQ_MODEL=llama-3.3-70b-versatile
+
+# Gemini:
+# NLQ_BACKEND=gemini
+# GEMINI_API_KEY=AIzaxxxx
+
+# Local Ollama (no API key needed):
+# NLQ_BACKEND=ollama
+# OLLAMA_HOST=http://localhost:11434
+# OLLAMA_MODEL=phi3.5
+```
+
+Then restart: `sudo systemctl restart wazuh-dashboard`
 
 ---
 
@@ -490,7 +529,8 @@ The **NLQ Search** plugin (`nlqSearch/`) adds a dedicated search page to the Waz
 
 ```bash
 cd nlqSearch
-export GEMINI_API_KEY=your-key-here
+export GROQ_API_KEY=gsk_xxxxxxxxxxxxxxxxxxxx   # recommended
+# or: export GEMINI_API_KEY=your-key-here
 sudo -E bash install.sh
 ```
 

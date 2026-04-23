@@ -32,8 +32,10 @@ const { transpile }  = require('../lib/transpiler');
 // ── Config ────────────────────────────────────────────────────────────────────
 
 const MAX_RETRIES     = 2;     // Schema correction rounds after initial call
+const GROQ_API_KEY    = process.env.GROQ_API_KEY    || '';
+const GROQ_MODEL      = process.env.GROQ_MODEL      || 'llama-3.3-70b-versatile';
 const GEMINI_API_KEY  = process.env.GEMINI_API_KEY  || '';
-const NLQ_BACKEND     = process.env.NLQ_BACKEND     || (GEMINI_API_KEY ? 'gemini' : 'ollama');
+const NLQ_BACKEND     = process.env.NLQ_BACKEND     || (GROQ_API_KEY ? 'groq' : GEMINI_API_KEY ? 'gemini' : 'ollama');
 const GEMINI_MODEL    = process.env.GEMINI_MODEL    || 'gemini-2.5-flash';
 const OLLAMA_HOST     = process.env.OLLAMA_HOST     || 'http://localhost:11434';
 const OLLAMA_MODEL    = process.env.OLLAMA_MODEL    || 'phi3.5';
@@ -414,10 +416,16 @@ function defineRoutes(router, logger) {
 
       // Pick backend config
       const chosenBackend = backend || NLQ_BACKEND;
+      const apiKeyForBackend =
+        chosenBackend === 'groq'   ? GROQ_API_KEY   :
+        chosenBackend === 'gemini' ? GEMINI_API_KEY : '';
+      const modelForBackend =
+        chosenBackend === 'ollama' ? OLLAMA_MODEL :
+        chosenBackend === 'groq'   ? GROQ_MODEL   : GEMINI_MODEL;
       const llmConfig = {
         backend:   chosenBackend,
-        apiKey:    GEMINI_API_KEY,
-        model:     chosenBackend === 'ollama' ? OLLAMA_MODEL : GEMINI_MODEL,
+        apiKey:    apiKeyForBackend,
+        model:     modelForBackend,
         ollamaUrl: OLLAMA_HOST,
       };
 

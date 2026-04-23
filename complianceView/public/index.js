@@ -690,9 +690,9 @@ ComplianceViewPlugin.prototype.setup = function(core) {
     title:       'Compliance View',
     euiIconType: 'visTable',
     category: {
-      id:    'wazuh',
-      label: 'Wazuh',
-      order: 1000,
+      id:    'wz-category-security-operations',
+      label: 'Security Operations',
+      order: 2000,
     },
     order: 9200,
     mount: function(params) {

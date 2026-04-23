@@ -46,7 +46,7 @@ Plain English query
 Time-range pre-processor (deterministic regex — runs BEFORE the LLM)
         │
         ▼
-LLM call (Gemini 2.5-flash or local Ollama model)
+LLM call (Groq llama-3.3-70b-versatile, Gemini 2.5-flash, or local Ollama model)
         │  produces Sec-IR JSON
         ▼
 Schema validator
@@ -93,7 +93,7 @@ Example IR for *"Show failed admin logins in the last 24 hours"*:
 | **Editable IR** | Edit the generated Sec-IR JSON and re-transpile without another LLM call |
 | **Self-correction** | Up to 2 automatic retry rounds when the LLM output fails schema validation |
 | **Time-range detector** | Deterministic regex extracts time windows before the LLM call |
-| **Dual backend** | Gemini API (cloud) or Ollama (local) — swap with one env var |
+| **Multi-backend** | Groq API (default), Gemini API (cloud), or Ollama (local) — swap with one env var |
 
 ---
 
@@ -117,7 +117,8 @@ nlqSearch/
 │   │   ├── validator.js          ← manual schema validator (zero deps)
 │   │   └── transpiler.js        ← Wazuh DSL transpiler
 │   └── llm_backends/
-│       ├── index.js              ← backend factory (picks gemini/ollama)
+│       ├── index.js              ← backend factory (picks groq/gemini/ollama)
+│       ├── groq.js               ← Groq OpenAI-compatible API client
 │       ├── gemini.js             ← Gemini REST API client
 │       └── ollama.js             ← Ollama HTTP client
 ├── public/
@@ -136,8 +137,9 @@ nlqSearch/
 ```bash
 cd /path/to/wazuh-fyp-repo/nlqSearch
 
-# Set your Gemini API key (or skip for Ollama)
-export GEMINI_API_KEY=your-key-here
+# Set your Groq API key (recommended) — or Gemini, or skip for Ollama
+export GROQ_API_KEY=gsk_xxxxxxxxxxxxxxxxxxxx
+# Alternative: export GEMINI_API_KEY=your-key-here
 
 sudo -E bash install.sh
 ```
@@ -171,11 +173,11 @@ sudo cp server/lib/*.js server/lib/schema.json "${PLUGIN_DIR}/server/lib/"
 sudo cp server/llm_backends/*.js "${PLUGIN_DIR}/server/llm_backends/"
 sudo cp target/public/nlqSearch.plugin.js "${PLUGIN_DIR}/target/public/"
 
-# Write API key
+# Write API key (use Groq, or replace with Gemini vars)
 sudo tee "${PLUGIN_DIR}/server/.env" <<EOF
-GEMINI_API_KEY=your-key-here
-NLQ_BACKEND=gemini
-GEMINI_MODEL=gemini-2.5-flash
+GROQ_API_KEY=gsk_xxxxxxxxxxxxxxxxxxxx
+GROQ_MODEL=llama-3.3-70b-versatile
+NLQ_BACKEND=groq
 INDEXER_HOST=localhost
 INDEXER_PORT=9200
 INDEXER_USER=admin
@@ -194,7 +196,9 @@ Edit `/usr/share/wazuh-dashboard/plugins/nlqSearch/server/.env` after installati
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `NLQ_BACKEND` | `gemini` | `gemini` or `ollama` |
+| `NLQ_BACKEND` | `groq` | `groq`, `gemini`, or `ollama` |
+| `GROQ_API_KEY` | _(required for Groq)_ | Groq API key — get at [console.groq.com/keys](https://console.groq.com/keys) |
+| `GROQ_MODEL` | `llama-3.3-70b-versatile` | Groq model to use (also: `llama-3.1-8b-instant`, `mixtral-8x7b-32768`) |
 | `GEMINI_API_KEY` | _(required for Gemini)_ | Google AI Studio API key |
 | `GEMINI_MODEL` | `gemini-2.5-flash` | Gemini model to use |
 | `OLLAMA_HOST` | `http://localhost:11434` | Ollama server URL |
@@ -223,7 +227,7 @@ Translates plain English to Sec-IR + Wazuh DSL.
 ```json
 {
   "query": "Show failed logins from 10.0.0.5 in the last 6 hours",
-  "backend": "gemini"
+  "backend": "groq"
 }
 ```
 
@@ -295,9 +299,27 @@ Re-generates Wazuh DSL from an edited IR JSON object (no LLM call).
 
 ---
 
-## Switching to Ollama
+## Switching Backends
 
-For fully offline operation with no API key:
+### Groq (default — recommended)
+
+```
+NLQ_BACKEND=groq
+GROQ_API_KEY=gsk_xxxxxxxxxxxxxxxxxxxx
+GROQ_MODEL=llama-3.3-70b-versatile
+```
+
+Get your key at [console.groq.com/keys](https://console.groq.com/keys). Free tier available. Other available models: `llama-3.1-8b-instant` (lower latency), `mixtral-8x7b-32768`, `gemma2-9b-it`.
+
+### Gemini
+
+```
+NLQ_BACKEND=gemini
+GEMINI_API_KEY=AIzaxxxxxxxxxxxxxxxxx
+GEMINI_MODEL=gemini-2.5-flash
+```
+
+### Ollama (fully offline, no API key required)
 
 1. Install Ollama: https://ollama.com
 2. Pull a model: `ollama pull phi3.5` (or `qwen3:4b`, `mistral`, etc.)
@@ -308,6 +330,8 @@ For fully offline operation with no API key:
    OLLAMA_MODEL=phi3.5
    ```
 4. Restart the dashboard.
+
+After any `.env` change, restart: `sudo systemctl restart wazuh-dashboard`
 
 ---
 

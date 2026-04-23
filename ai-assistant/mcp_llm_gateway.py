@@ -77,6 +77,9 @@ LLM_PROVIDER = os.getenv("LLM_PROVIDER", "openai").lower()
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
 OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-4o")
 
+GROQ_API_KEY = os.getenv("GROQ_API_KEY", "")
+GROQ_MODEL = os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile")
+
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
 GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
 
@@ -224,6 +227,16 @@ def _build_llm():
             raise RuntimeError("OPENAI_API_KEY required for OpenAI provider.")
         return ChatOpenAI(model=OPENAI_MODEL, temperature=0)
 
+    elif LLM_PROVIDER == "groq":
+        if not GROQ_API_KEY:
+            raise RuntimeError("GROQ_API_KEY required for Groq provider.")
+        return ChatOpenAI(
+            model=GROQ_MODEL,
+            temperature=0,
+            base_url="https://api.groq.com/openai/v1",
+            api_key=GROQ_API_KEY,
+        )
+
     elif LLM_PROVIDER == "gemini":
         if not GEMINI_API_KEY:
             raise RuntimeError("GEMINI_API_KEY required for Gemini provider.")
@@ -243,7 +256,7 @@ def _build_llm():
             model_kwargs={"temperature": 0},
         )
 
-    raise RuntimeError(f"Unsupported LLM_PROVIDER: {LLM_PROVIDER}")
+    raise RuntimeError(f"Unsupported LLM_PROVIDER: {LLM_PROVIDER}. Use groq, openai, gemini, or claude_bedrock.")
 
 
 
@@ -334,7 +347,12 @@ async def health():
         "status": status,
         "details": details,
         "provider": LLM_PROVIDER,
-        "model": GEMINI_MODEL if LLM_PROVIDER == "gemini" else (OPENAI_MODEL if LLM_PROVIDER == "openai" else BEDROCK_MODEL_ID),
+        "model": (
+            GROQ_MODEL   if LLM_PROVIDER == "groq"   else
+            GEMINI_MODEL if LLM_PROVIDER == "gemini" else
+            OPENAI_MODEL if LLM_PROVIDER == "openai" else
+            BEDROCK_MODEL_ID
+        ),
         "mcp_url": MCP_SSE_URL,
     }
 

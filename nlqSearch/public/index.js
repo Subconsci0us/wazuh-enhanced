@@ -755,7 +755,7 @@ NlqSearchPlugin.prototype.setup = function(core) {
     id:          'nlqSearch',
     title:       'NLQ Search',
     euiIconType: 'search',
-    category: { id: 'wazuh', label: 'Wazuh', order: 1000 },
+    category: { id: 'explore', label: 'Explore', order: 100 },
     order:       9200,
     mount: function(params) { return mountApp(params); },
   });

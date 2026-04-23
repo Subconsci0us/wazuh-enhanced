@@ -687,22 +687,14 @@ function NetworkGraphPlugin() {}
  * @param {object} core  OSD core setup contract (browser-side).
  */
 NetworkGraphPlugin.prototype.setup = function(core) {
+  /* The /app/networkGraph route still works and OSD mounts the page when
+     navigated to directly.  The sidebar entry is intentionally omitted here —
+     the plugin is surfaced via Wazuh's native Threat Intelligence sidebar
+     (added by patch_plugin.py) rather than the generic OSD nav. */
   core.application.register({
-    id:          'networkGraph',   // Must match opensearch_dashboards.json "id".
-    title:       'Network Graph',  // Sidebar label.
-    euiIconType: 'visNetwork',     // EUI icon shown next to the label.
-    category: {
-      id:    'wazuh',              // Groups this app under the Wazuh section.
-      label: 'Wazuh',
-      order: 1000,
-    },
-    order: 9100,                   // Position within the Wazuh section.
-
-    /**
-     * mount() is called by OSD when the user navigates to /app/networkGraph.
-     * It receives a params object with an `element` (the full-page container).
-     * It must return an unmount function.
-     */
+    id:          'networkGraph',
+    title:       'Network Graph',
+    euiIconType: 'visNetwork',
     mount: function(params) {
       return mountApp(params);
     },

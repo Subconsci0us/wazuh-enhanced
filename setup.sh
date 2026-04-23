@@ -556,7 +556,10 @@ install_aiAssistant() {
         echo ""
         warn "ACTION REQUIRED: Fill in LLM credentials:"
         warn "  sudo nano /etc/mcp-llm-gateway/mcp-llm-gateway.env"
-        warn "  Set LLM_PROVIDER, matching API key, GATEWAY_API_KEY, MCP_SSE_URL."
+        warn "  Groq (recommended — fast, free tier): LLM_PROVIDER=groq  GROQ_API_KEY=gsk_xxxx"
+        warn "  OpenAI: LLM_PROVIDER=openai  OPENAI_API_KEY=sk-xxxx"
+        warn "  Gemini: LLM_PROVIDER=gemini  GEMINI_API_KEY=AIzaxxxx"
+        warn "  Also set: GATEWAY_API_KEY=<your-secret>  MCP_SSE_URL=http://127.0.0.1:9900/sse"
         warn "Press ENTER to continue once saved, or Ctrl-C to abort."
         read -r _
     fi
@@ -880,15 +883,23 @@ install_nlqSearch() {
     local _NORESTART=""
     [ "${NO_RESTART}" -eq 1 ] && _NORESTART="--no-restart"
 
+    # Forward whichever LLM key is set so install.sh can write it into .env
+    export GROQ_API_KEY="${GROQ_API_KEY:-}"
+    export GROQ_MODEL="${GROQ_MODEL:-llama-3.3-70b-versatile}"
+    export GEMINI_API_KEY="${GEMINI_API_KEY:-}"
+    export NLQ_BACKEND="${NLQ_BACKEND:-}"
+
     info "Running nlqSearch/install.sh …"
     (cd "$NLQ_DIR" && _sudo bash install.sh ${_NORESTART}) \
         || { error "nlqSearch/install.sh failed"; return 1; }
 
-    if [ -z "${GEMINI_API_KEY:-}" ]; then
+    if [ -z "${GROQ_API_KEY:-}" ] && [ -z "${GEMINI_API_KEY:-}" ]; then
         echo ""
-        warn "GEMINI_API_KEY is not set. To enable Gemini backend for NLQ Search:"
+        warn "No LLM API key is set. To enable the Groq backend for NLQ Search (recommended):"
+        warn "  export GROQ_API_KEY=gsk_xxxx && sudo -E bash setup.sh --only nlqSearch"
+        warn "Or edit the installed config directly:"
         warn "  sudo nano /usr/share/wazuh-dashboard/plugins/nlqSearch/server/.env"
-        warn "  Set: GEMINI_API_KEY=your-key-here"
+        warn "  Set: GROQ_API_KEY=gsk_xxxx  NLQ_BACKEND=groq"
     fi
     if [ -z "${INDEXER_PASSWORD:-}" ]; then
         warn "ACTION REQUIRED: INDEXER_PASSWORD could not be auto-resolved."

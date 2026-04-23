@@ -3,24 +3,24 @@
 /**
  * server/llm_backends/index.js — LLM backend factory
  *
- * Picks the correct backend (Gemini or Ollama) based on config and exposes
- * a single unified callLLM() function.
+ * Picks the correct backend (Groq, Gemini, or Ollama) based on config and
+ * exposes a single unified callLLM() function.
  *
- * Swapping backends is a single config change — either set NLQ_BACKEND=ollama
- * in the environment or pass backend='ollama' to callLLM().
+ * Swapping backends is a single config change — set NLQ_BACKEND in .env.
  *
  * Interface:
  *   callLLM(systemPrompt, userMessage, config) → Promise<string>
  *
  * config shape:
  *   {
- *     backend:    'gemini' | 'ollama',   // required
- *     apiKey:     string,                // Gemini only
- *     model:      string,                // optional model override
- *     ollamaUrl:  string,                // Ollama base URL override
+ *     backend:    'groq' | 'gemini' | 'ollama',  // required
+ *     apiKey:     string,                         // Groq or Gemini key
+ *     model:      string,                         // optional model override
+ *     ollamaUrl:  string,                         // Ollama base URL override
  *   }
  */
 
+const { callGroq   } = require('./groq');
 const { callGemini } = require('./gemini');
 const { callOllama } = require('./ollama');
 
@@ -34,6 +34,16 @@ const { callOllama } = require('./ollama');
  */
 async function callLLM(systemPrompt, userMessage, config) {
   const backend = config.backend || detectBackend(config);
+
+  if (backend === 'groq') {
+    if (!config.apiKey) {
+      throw new Error(
+        'Groq backend selected but GROQ_API_KEY is not set. ' +
+        'Set the environment variable or switch to NLQ_BACKEND=ollama.'
+      );
+    }
+    return callGroq(systemPrompt, userMessage, config.apiKey, config.model);
+  }
 
   if (backend === 'gemini') {
     if (!config.apiKey) {
@@ -49,16 +59,18 @@ async function callLLM(systemPrompt, userMessage, config) {
     return callOllama(systemPrompt, userMessage, config.ollamaUrl, config.model);
   }
 
-  throw new Error(`Unknown LLM backend: "${backend}". Use "gemini" or "ollama".`);
+  throw new Error(`Unknown LLM backend: "${backend}". Use "groq", "gemini", or "ollama".`);
 }
 
 /**
  * Auto-detect which backend to use based on available credentials/config.
+ * Priority: Groq → Gemini → Ollama.
  * @param {object} config
- * @returns {string} 'gemini' | 'ollama'
+ * @returns {string} 'groq' | 'gemini' | 'ollama'
  */
 function detectBackend(config) {
-  if (config.apiKey || process.env.GEMINI_API_KEY) return 'gemini';
+  if (config.apiKey || process.env.GROQ_API_KEY)   return 'groq';
+  if (process.env.GEMINI_API_KEY)                  return 'gemini';
   return 'ollama';
 }
 

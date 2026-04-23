@@ -688,3 +688,114 @@ The `resultsArea` div was initialised with `display:none` and only shown after a
 ### Status
 
 Built, installed, compressed variants regenerated. ✓
+
+---
+
+## Session — 2026-04-23
+
+**Developer:** Claude Sonnet 4.6  
+**Target:** EC2 deployment (Ubuntu) + local source (`wazuh-fyp-repo/`)  
+**Scope:** Replace Gemini as the default LLM backend with Groq across the NLQ Search plugin and the AI Assistant gateway
+
+---
+
+### Motivation
+
+Groq provides OpenAI-compatible REST API endpoints with substantially faster inference than Gemini's `generateContent` API. Because `langchain-openai.ChatOpenAI` already supports a `base_url` override, and because the Groq chat-completions format is identical to OpenAI's, the migration required adding one new backend file and updating four existing files — no architectural change.
+
+---
+
+### Research
+
+- Groq API endpoint: `https://api.groq.com/openai/v1/chat/completions`
+- Auth header: `Authorization: Bearer <GROQ_API_KEY>`
+- Request body: standard OpenAI chat completions format (`model`, `messages`, `temperature`, `response_format`)
+- Response: standard OpenAI format — text in `choices[0].message.content`
+- `response_format: { type: "json_object" }` enforces structured JSON output (same flag used with OpenAI)
+- For the AI Assistant (Python/LangChain): `ChatOpenAI(base_url="https://api.groq.com/openai/v1", api_key=GROQ_API_KEY, model=GROQ_MODEL)` — no new package needed, `langchain-openai` already installed
+
+---
+
+### Files Created
+
+| File | Description |
+|------|-------------|
+| `server/llm_backends/groq.js` | New Node.js backend. Calls Groq's OpenAI-compatible endpoint using built-in `https`. Temperature=0, `response_format: json_object`. Includes `extractJson()` helper to strip markdown fences. |
+
+---
+
+### Files Modified
+
+#### `server/llm_backends/index.js`
+- Added `const { callGroq } = require('./groq')`
+- Added `groq` branch in `callLLM()` — checks `config.apiKey` and delegates to `callGroq()`
+- Updated `detectBackend()`: priority order is now **Groq → Gemini → Ollama** (checks `GROQ_API_KEY` first)
+- Updated error message to list `"groq"`, `"gemini"`, `"ollama"` as valid values
+
+#### `server/routes/index.js`
+- Added `GROQ_API_KEY` and `GROQ_MODEL` constants read from `process.env`
+- Updated `NLQ_BACKEND` auto-detection: `GROQ_API_KEY ? 'groq' : GEMINI_API_KEY ? 'gemini' : 'ollama'`
+- Replaced the hardcoded `apiKey: GEMINI_API_KEY` in `llmConfig` with `apiKeyForBackend` (ternary that picks Groq/Gemini key based on chosen backend)
+- Replaced the hardcoded `model` selector with `modelForBackend` (picks GROQ_MODEL / GEMINI_MODEL / OLLAMA_MODEL)
+
+#### `install.sh`
+- Warning block: changed from `GEMINI_API_KEY` to check both `GROQ_API_KEY` and `GEMINI_API_KEY`
+- Copy block: added `cp groq.js "${INSTALL_DIR}/server/llm_backends/"`
+- Generated `.env` template: added `GROQ_API_KEY` and `GROQ_MODEL` lines; changed `NLQ_BACKEND` default from `gemini` to `groq`
+- Final note: updated to reference `GROQ_API_KEY`
+
+#### `.env.example`
+- Added `GROQ_API_KEY` and `GROQ_MODEL` fields under a new `## Groq API` section
+- Changed `NLQ_BACKEND` default to `groq`
+
+---
+
+### Environment variable reference (post-change)
+
+| Variable | Default | Notes |
+|----------|---------|-------|
+| `NLQ_BACKEND` | `groq` | `groq` \| `gemini` \| `ollama` |
+| `GROQ_API_KEY` | _(required for groq)_ | From [console.groq.com/keys](https://console.groq.com/keys) |
+| `GROQ_MODEL` | `llama-3.3-70b-versatile` | Also: `llama-3.1-8b-instant`, `mixtral-8x7b-32768` |
+| `GEMINI_API_KEY` | _(required for gemini)_ | From Google AI Studio |
+| `GEMINI_MODEL` | `gemini-2.5-flash` | |
+| `OLLAMA_HOST` | `http://localhost:11434` | |
+| `OLLAMA_MODEL` | `phi3.5` | |
+
+---
+
+### Auto-detection logic
+
+When `NLQ_BACKEND` is not set explicitly, the plugin picks:
+1. `groq` — if `GROQ_API_KEY` is non-empty
+2. `gemini` — if `GEMINI_API_KEY` is non-empty
+3. `ollama` — fallback (no key required)
+
+This is consistent between `routes/index.js` (server startup) and `llm_backends/index.js` (per-request fallback).
+
+---
+
+### Testing (EC2 deployment)
+
+All patches applied cleanly via Python replace scripts run over SSH. Verified with:
+
+```bash
+grep -n 'groq\|GROQ' ~/wazuh-fyp-repo/nlqSearch/server/routes/index.js
+# → lines 35–36 (GROQ_API_KEY, GROQ_MODEL constants)
+# → line 38 (NLQ_BACKEND auto-detect)
+# → lines 419–424 (apiKeyForBackend, modelForBackend)
+
+grep -n 'groq\|GROQ' ~/wazuh-fyp-repo/nlqSearch/install.sh
+# → lines 42–47, 117, 131–134, 205–207
+
+ls ~/wazuh-fyp-repo/nlqSearch/server/llm_backends/
+# → gemini.js  groq.js  index.js  ollama.js  ✓
+```
+
+Plugin not re-installed on EC2 after patch (install.sh must be re-run with `GROQ_API_KEY` set to activate the new backend on the live deployment).
+
+---
+
+### Status
+
+Source files updated, documentation updated, session log appended. **Untested end-to-end** — install.sh must be re-run with a Groq API key to verify the full translation pipeline.
