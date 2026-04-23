@@ -168,3 +168,32 @@ Removed the old `#cv-root, #ng-root, #nlq-root { background: #0d0d1a !important;
 ### Status
 
 Built, installed, compressed variants regenerated, dashboard restarted. ✓
+
+---
+## Session 2026-04-23 (FIX 1 — toolbar redesign)
+
+### Changes to public/index.js
+
+**Theme button hidden (TEMPORARY)**
+- `themeBtn` still created but `themeBtn.style.display = 'none'` added
+- Theme logic (`setDarkMode`, `fyp_theme_v2` localStorage key) fully preserved
+- `setDarkMode()` now dispatches `fyp-theme-changed` CustomEvent:
+  ```js
+  window.dispatchEvent(new CustomEvent('fyp-theme-changed', { detail: { theme: enabled ? 'dark' : 'light' } }));
+  ```
+  Custom plugins subscribe to this event to toggle their `.dark-theme` class.
+
+**EN/UR button redesign**
+- Replaced single toggle `langBtn` with two always-visible buttons: `enBtn` and `urBtn`
+- Both appended to the `<dialog>` toolbar
+- New `LANG_BTN_BASE` constant holds shared button styles (no color)
+- New `_syncLangBtns(enBtn, urBtn)` function applies:
+  - Active language: `background:#3b82f6; color:#fff; border:1px solid #3b82f6` (solid blue)
+  - Inactive language: `background:transparent; color:#94a3b8; border:1px solid #475569` (muted/outlined)
+- Styling is theme-independent (fixed colors, not inherited from OSD theme)
+- `setLanguage()` calls `_syncLangBtns()` on every language change
+
+### Build & install
+- Built in /tmp/localization-build (`webpack compiled successfully`)
+- Installed to `/usr/share/wazuh-dashboard/plugins/localization/target/public/localization.plugin.js`
+- Wazuh-dashboard restarted

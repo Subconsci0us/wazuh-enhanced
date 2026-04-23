@@ -2,6 +2,13 @@
 # ────────────────────────────────────────────────────────────────────────────
 # install.sh — Build and install the localization OSD plugin
 #
+# Implements:
+#   • Floating toolbar with EN / UR language toggle (dual always-visible buttons)
+#   • Dark / light theme toggle (button hidden by default — TEMPORARY)
+#   • fyp-theme-changed CustomEvent dispatched on theme change so other plugins
+#     (networkGraph, nlqSearch, complianceView) can react
+#   • localStorage keys: fyp_language, fyp_theme_v2
+#
 # Usage (run as root or with sudo):
 #   bash install.sh              # build, install, restart wazuh-dashboard
 #   bash install.sh --no-restart # build and install only; skip service restart
@@ -28,7 +35,7 @@ command -v node >/dev/null 2>&1 || { echo "ERROR: node is required"; exit 1; }
 command -v npm  >/dev/null 2>&1 || { echo "ERROR: npm is required";  exit 1; }
 echo "Node : $(node --version)"
 
-# ── 2. Copy sources to /tmp to avoid vboxsf symlink restrictions ─────────────
+# ── 2. Copy sources to /tmp to avoid vboxsf/symlink restrictions ─────────────
 echo ""
 echo "[1/4] Preparing build directory…"
 rm -rf "${BUILD_DIR}"
@@ -67,7 +74,6 @@ if [ -d "${INSTALL_DIR}" ]; then
   rm -rf "${INSTALL_DIR}"
 fi
 
-mkdir -p "${INSTALL_DIR}"
 mkdir -p "${INSTALL_DIR}/target/public"
 mkdir -p "${INSTALL_DIR}/server"
 
@@ -82,7 +88,7 @@ if id wazuh-dashboard >/dev/null 2>&1; then
 fi
 
 rm -rf "${BUILD_DIR}"
-echo "      Files installed."
+echo "      Plugin files installed."
 
 # ── 6. Restart wazuh-dashboard ───────────────────────────────────────────────
 echo ""
@@ -103,10 +109,16 @@ fi
 echo ""
 echo "=== Installation complete ==="
 echo ""
-echo "The localization toolbar will appear on every Wazuh Dashboard page"
-echo "as a floating pill in the bottom-right corner."
+echo "The localization toolbar appears as a floating pill (bottom-right corner)"
+echo "on every Wazuh Dashboard page."
 echo ""
-echo "  ☾ Dark  — toggles dark mode for the entire dashboard"
-echo "  اردو    — switches all custom plugin text to Urdu with RTL layout"
+echo "  EN | UR  — language toggle (active = solid blue #3b82f6, inactive = muted outline)"
+echo "  Theme    — dark/light toggle (currently hidden; TEMPORARY — set display:block to re-enable)"
 echo ""
-echo "Preferences are persisted in browser localStorage (fyp_theme, fyp_language)."
+echo "localStorage keys used:"
+echo "  fyp_language  — 'en' or 'ur'"
+echo "  fyp_theme_v2  — 'light' (default) or 'dark'"
+echo ""
+echo "Theme changes broadcast via CustomEvent 'fyp-theme-changed' on window."
+echo "Other plugins (networkGraph, nlqSearch, complianceView) listen for this"
+echo "event to toggle their .dark-theme CSS class."

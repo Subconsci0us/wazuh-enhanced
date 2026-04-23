@@ -186,7 +186,7 @@ sudo bash /media/sf_sharedfolderclone/wazuh-fyp-repo/setup.sh --only complianceV
 
 After installation, navigate to `https://<dashboard-host>/app/complianceView`.
 
-The plugin appears in the Wazuh sidebar under the **Wazuh** section as **Compliance View**.
+The plugin appears in the OSD sidebar under **Security Operations** as **Compliance View**.
 
 ---
 

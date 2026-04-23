@@ -799,3 +799,32 @@ Plugin not re-installed on EC2 after patch (install.sh must be re-run with `GROQ
 ### Status
 
 Source files updated, documentation updated, session log appended. **Untested end-to-end** — install.sh must be re-run with a Groq API key to verify the full translation pipeline.
+
+---
+
+## 2026-04-23 — Moved OSD sidebar entry to Explore section
+
+### Change
+
+Changed `core.application.register()` category in `public/index.js`:
+
+| Field | Before | After |
+|-------|--------|-------|
+| `id` | `wazuh` | `explore` |
+| `label` | `Wazuh` | `Explore` |
+| `order` | `1000` | `100` |
+
+NLQ Search now appears in the OSD **Explore** section of the sidebar (alongside Discover) rather than the generic Wazuh section.
+
+### Reason
+
+User request — consolidate the custom FYP plugins out of the generic "Wazuh" OSD category. Explore is the natural home for a search/query tool.
+
+### Files changed
+
+- `public/index.js` — updated `category` in `core.application.register()`
+- `target/public/nlqSearch.plugin.js` — rebuilt (webpack production)
+
+### Status
+
+Bundle rebuilt. ✓

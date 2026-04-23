@@ -271,6 +271,7 @@ function removeStyle(id) {
 
 // ── Toolbar ───────────────────────────────────────────────────────────────────
 
+// Base style for the theme button (dark-background toolbar aesthetic).
 var BTN_STYLE = [
   'background: rgba(30,41,59,0.85)',
   'color: #e2e8f0',
@@ -284,6 +285,19 @@ var BTN_STYLE = [
   'white-space: nowrap',
   'line-height: 1.4',
   'transition: background 0.15s, border-color 0.15s',
+].join(';');
+
+// Base style for language buttons — accent/muted states applied separately by _syncLangBtns().
+var LANG_BTN_BASE = [
+  'border-radius: 4px',
+  'padding: 4px 9px',
+  'cursor: pointer',
+  'font-size: 11px',
+  'font-weight: 700',
+  'letter-spacing: 0.4px',
+  'white-space: nowrap',
+  'line-height: 1.4',
+  'transition: background 0.15s, border-color 0.15s, color 0.15s',
 ].join(';');
 
 // _mountToolbar — safe wrapper called from start() and the MutationObserver.
@@ -342,25 +356,45 @@ function createToolbar() {
     'direction: ltr',
   ].join(';');
 
-  var langBtn  = document.createElement('button');
+  /* Two language buttons — both always visible.
+     Active language = solid blue (#3b82f6).  Inactive = muted/outlined.
+     Styling is theme-independent (same accent colour in any mode). */
+  var enBtn = document.createElement('button');
+  var urBtn = document.createElement('button');
+
+  enBtn.id          = 'fyp-en-btn';
+  urBtn.id          = 'fyp-ur-btn';
+  enBtn.textContent = 'EN';
+  urBtn.textContent = 'UR';
+
+  _syncLangBtns(enBtn, urBtn);
+
+  enBtn.addEventListener('mouseenter', function() {
+    this.style.background = _lang === 'en' ? '#2563eb' : 'rgba(71,85,105,0.35)';
+  });
+  enBtn.addEventListener('mouseleave', function() { _syncLangBtns(); });
+
+  urBtn.addEventListener('mouseenter', function() {
+    this.style.background = _lang === 'ur' ? '#2563eb' : 'rgba(71,85,105,0.35)';
+  });
+  urBtn.addEventListener('mouseleave', function() { _syncLangBtns(); });
+
+  enBtn.addEventListener('click', function() { setLanguage('en'); });
+  urBtn.addEventListener('click', function() { setLanguage('ur'); });
+
+  /* Theme button — code preserved but hidden from UI.
+     The localStorage key fyp_theme_v2 and setDarkMode() continue to function
+     programmatically; the button is just not rendered in the toolbar.
+     TEMPORARY: Theme toggle hidden pending full-app dark mode support.
+     To re-enable, remove the `themeBtn.style.display = 'none'` line below
+     and un-comment the `dlg.appendChild(themeBtn)` call. */
   var themeBtn = document.createElement('button');
-
-  langBtn.id       = 'fyp-lang-btn';
-  themeBtn.id      = 'fyp-theme-btn';
-  langBtn.style.cssText  = BTN_STYLE;
+  themeBtn.id            = 'fyp-theme-btn';
   themeBtn.style.cssText = BTN_STYLE;
+  themeBtn.style.display = 'none';   // TEMPORARY: hidden until full dark-mode rollout
 
-  _syncLangBtn(langBtn);
   _syncThemeBtn(themeBtn);
 
-  langBtn.addEventListener('mouseenter', function() {
-    this.style.background = 'rgba(51,65,85,0.9)';
-    this.style.borderColor = '#60a5fa';
-  });
-  langBtn.addEventListener('mouseleave', function() {
-    this.style.background = 'rgba(30,41,59,0.85)';
-    this.style.borderColor = '#475569';
-  });
   themeBtn.addEventListener('mouseenter', function() {
     this.style.background = 'rgba(51,65,85,0.9)';
     this.style.borderColor = '#60a5fa';
@@ -369,16 +403,14 @@ function createToolbar() {
     this.style.background = 'rgba(30,41,59,0.85)';
     this.style.borderColor = '#475569';
   });
-
-  langBtn.addEventListener('click', function() {
-    setLanguage(_lang === 'en' ? 'ur' : 'en');
-  });
   themeBtn.addEventListener('click', function() {
     setDarkMode(!_dark);
   });
 
-  dlg.appendChild(langBtn);
-  dlg.appendChild(themeBtn);
+  dlg.appendChild(enBtn);
+  dlg.appendChild(urBtn);
+  dlg.appendChild(themeBtn); // themeBtn is display:none — kept for future re-enable
+
   document.body.appendChild(dlg);
 
   // show() opens as non-modal (no backdrop, no focus trap).
@@ -390,11 +422,30 @@ function createToolbar() {
   }
 }
 
-function _syncLangBtn(btn) {
-  btn = btn || document.getElementById('fyp-lang-btn');
-  if (!btn) return;
-  btn.textContent = _lang === 'en' ? 'اردو' : 'EN';
-  btn.title = _lang === 'en' ? 'Switch to Urdu / اردو میں تبدیل کریں' : 'Switch to English';
+/**
+ * Sync both EN and UR language buttons to reflect the current active language.
+ * Active language: solid blue accent.  Inactive: muted transparent outline.
+ * Styling is theme-independent — same appearance in light and dark mode.
+ */
+function _syncLangBtns(enBtn, urBtn) {
+  enBtn = enBtn || document.getElementById('fyp-en-btn');
+  urBtn = urBtn || document.getElementById('fyp-ur-btn');
+  if (!enBtn || !urBtn) return;
+
+  var ACTIVE   = LANG_BTN_BASE + ';background:#3b82f6;color:#fff;border:1px solid #3b82f6;';
+  var INACTIVE = LANG_BTN_BASE + ';background:transparent;color:#94a3b8;border:1px solid #475569;';
+
+  if (_lang === 'en') {
+    enBtn.style.cssText = ACTIVE;
+    urBtn.style.cssText = INACTIVE;
+    enBtn.title = 'English (active)';
+    urBtn.title = 'Switch to Urdu / اردو میں تبدیل کریں';
+  } else {
+    enBtn.style.cssText = INACTIVE;
+    urBtn.style.cssText = ACTIVE;
+    enBtn.title = 'Switch to English';
+    urBtn.title = 'اردو (فعال)';
+  }
 }
 
 function _syncThemeBtn(btn) {
@@ -418,6 +469,13 @@ function setDarkMode(enabled) {
     document.body.classList.remove('fyp-dark');
   }
   _syncThemeBtn();
+
+  // Broadcast theme change so custom plugins can toggle their own dark-theme class.
+  try {
+    window.dispatchEvent(new CustomEvent('fyp-theme-changed', {
+      detail: { theme: enabled ? 'dark' : 'light' }
+    }));
+  } catch (_) {}
 }
 
 // ── Language / translation ────────────────────────────────────────────────────
@@ -447,7 +505,7 @@ function setLanguage(lang) {
   var map = lang === 'ur' ? EN_TO_UR : UR_TO_EN;
   _applyReplaceMap(map);
 
-  _syncLangBtn();
+  _syncLangBtns();
 
   // Notify custom plugins that may listen
   try {

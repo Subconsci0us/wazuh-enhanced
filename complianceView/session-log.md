@@ -455,3 +455,83 @@ export OS_PASSWORD="${OS_PASSWORD:-${WAZUH_INDEXER_PASSWORD:-}}"
 ### Status
 
 Resolved. On first-run install the `.env` is now written with the correct password automatically.
+
+---
+
+## 2026-04-23 — Moved OSD sidebar entry to Security Operations section
+
+### Change
+
+Changed `core.application.register()` category in `public/index.js`:
+
+| Field | Before | After |
+|-------|--------|-------|
+| `id` | `wazuh` | `wz-category-security-operations` |
+| `label` | `Wazuh` | `Security Operations` |
+| `order` | `1000` | `2000` |
+
+Compliance View now appears in the OSD sidebar under **Security Operations** — the same Wazuh-defined category used by PECA and Compliance Overview in `wazuh.plugin.js`.
+
+### Reason
+
+User request — remove all FYP plugins from the generic "Wazuh" OSD nav category and place each plugin in the semantically correct section. Security Operations is the correct home for a compliance dashboard.
+
+### Files changed
+
+- `public/index.js` — updated `category` in `core.application.register()`
+- `target/public/complianceView.plugin.js` — built for the first time (previously no pre-built bundle in the repo)
+
+### Status
+
+Bundle built and committed to repo. ✓
+
+---
+## Session 2026-04-23 (FIX 3 + FIX 4 — light theme default, sidebar hidden)
+
+### FIX 3: Light theme as default, dark theme via .dark-theme class
+
+**public/index.js — STYLES constant rewritten**
+- Light theme is now the default (matches Wazuh Dashboard native light mode):
+  - Root bg: `#f8fafc`, text: `#1a202c`, header bg: `#f1f5f9`, accent: `#2b6cb0`
+  - Table headers: `#f1f5f9` bg, `#4a5568` text, `#e2e8f0` borders
+- Dark theme scoped entirely to `.cv-root.dark-theme` CSS class
+  - All original dark colors preserved under `.cv-root.dark-theme .*` selectors
+  - Enable via: `localStorage.setItem('fyp_theme_v2','dark'); location.reload();`
+
+**public/index.js — mountApp() theme integration**
+- On mount: `if (localStorage.getItem('fyp_theme_v2') === 'dark') root.classList.add('dark-theme')`
+- Added `_onThemeChange(e)` handler that toggles `.dark-theme` on the root element
+- `window.addEventListener('fyp-theme-changed', _onThemeChange)` registered after root created
+- Unmount function extended: `window.removeEventListener('fyp-theme-changed', _onThemeChange)` called before DOM cleanup
+
+### FIX 4: Hide complianceView from sidebar
+
+**public/index.js — ComplianceViewPlugin.prototype.setup**
+- Added `navLinkStatus: 2` (AppNavLinkStatus.hidden) to `core.application.register()`
+- Removed `category` block — no longer needed
+- Plugin remains accessible at `/app/complianceView` and all API routes still active
+- Wazuh native routing (`/overview/?tab=compliance-overview&tabView=dashboard`) unaffected
+
+### patch_bundles.py — MOUNT_FN + step 10
+
+**MOUNT_FN updated** (affects fresh installs):
+- Same CSS changes as standalone plugin: light default, `.cv-ov.dark-theme` scoped dark
+- Theme init + `fyp-theme-changed` event listener injected before `loadAll()`
+- Return/unmount includes `window.removeEventListener('fyp-theme-changed', _onTheme)`
+- `ComplianceOverviewPanel` background changed from `#0d0d1a` to `transparent`
+
+**Step 10 added** (upgrades already-installed bundles):
+- `P10_CSS_OLD/NEW`: replaces old dark CSS with light default + dark-scoped CSS in installed bundle
+- `P10_THEME_OLD/NEW`: inserts theme init + event listener before loadAll() in installed bundle
+- Both use `apply_patch_marker` — idempotent, safe to re-run
+
+### Build & install
+- Built in /tmp/complianceView-build (`webpack compiled successfully in 1318ms`)
+- Installed to `/usr/share/wazuh-dashboard/plugins/complianceView/target/public/complianceView.plugin.js`
+- `sudo python3 patch_bundles.py`:
+  - Patches 1-6: SKIP (already applied)
+  - Patch 10a (cv-ov light CSS): OK
+  - Patch 10b (theme listener): OK
+  - peca app def + apps list: OK
+- Compressed assets regenerated: `wazuh.chunk.2.js.gz`, `.br`, `wazuh.plugin.js.gz`, `.br`
+- Wazuh-dashboard restarted — service active

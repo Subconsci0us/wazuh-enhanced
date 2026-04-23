@@ -727,3 +727,60 @@ Edge colours (gray/green/yellow/red) and manager/active/inactive node border col
 ### Status
 
 Built, installed, compressed variants regenerated. ✓
+
+---
+
+## 2026-04-23 — Removed redundant OSD sidebar entry
+
+### Change
+
+Removed the `core.application.register()` category block from `NetworkGraphPlugin.prototype.setup` in `public/index.js`. The plugin no longer appears as a navigation item in the generic OSD sidebar.
+
+The `/app/networkGraph` route is still registered (OSD still mounts the page) — only the sidebar entry is removed. Access is now exclusively through the Wazuh native sidebar entry added by `patch_plugin.py` under **Threat Intelligence > Network Graph** (order 303).
+
+### Reason
+
+The OSD sidebar entry (under "Wazuh") was redundant and created a duplicate link alongside the Wazuh-native entry. Removing it simplifies the navigation — the plugin is surfaced in exactly one place (the Wazuh Threat Intelligence section).
+
+### Files changed
+
+- `public/index.js` — removed `category` block from `core.application.register()`
+- `target/public/networkGraph.plugin.js` — rebuilt (webpack production)
+
+### Status
+
+Bundle rebuilt. ✓
+
+---
+## Session 2026-04-23 (FIX 2 — smooth refresh, no respawn animation)
+
+### Changes to public/index.js
+
+**Position preservation across poll cycles**
+- Added `var prevNodeIds = new Set()` in `createGraph()` closure scope
+- At the top of `update()`, snapshot current node positions from the live simulation:
+  ```js
+  var posMap = {};
+  simulation.nodes().forEach(function(n) {
+    if (n.id != null) posMap[n.id] = { x: n.x, y: n.y, vx: n.vx||0, vy: n.vy||0 };
+  });
+  ```
+- Manager node and each agent node carry `x, y, vx, vy` from posMap (falling back to undefined for new nodes, which D3 initialises randomly — correct behaviour)
+
+**Topology change detection**
+- Build `newNodeIds` Set each cycle; compare size and membership against `prevNodeIds`
+- `topologyChanged = true` only when nodes are added or removed
+- Update `prevNodeIds = newNodeIds` after detection
+
+**Conditional simulation restart**
+- `simulation.alpha(0.1).restart()` called only when `topologyChanged`
+- Steady-state polls (no topology change) leave the simulation untouched — nodes stay exactly where the user positioned them
+
+**Smooth transitions**
+- New nodes: enter at `opacity: 0`, fade to `1` over 400ms
+- Removed nodes: fade to `opacity: 0` over 400ms then `.remove()`
+- Edge colour updates: `transition().duration(500)` on stroke attribute
+
+### Build & install
+- Built in /tmp/networkGraph-build (`webpack compiled successfully in 33864ms`)
+- Installed to `/usr/share/wazuh-dashboard/plugins/networkGraph/target/public/networkGraph.plugin.js`

@@ -64,7 +64,8 @@ NET_GRAPH_APP = (
     'order:303,'
     'showInOverviewApp:true,'
     'showInAgentMenu:false,'
-    "redirectTo:()=>'/app/networkGraph'};"
+    "redirectTo:()=>{window.location.replace('/app/networkGraph');}}"
+    ';'
 )
 NET_GRAPH_MARKER = 'const network_graph_app='
 
@@ -117,6 +118,17 @@ def patch_plugin():
         print('  [ERROR] no suitable anchor found for network_graph_app constant',
               file=sys.stderr)
         sys.exit(1)
+
+    # ── Step 1b: fix redirectTo for already-installed bundle ──────────────────
+    # Old redirectTo used the Wazuh hash router which breaks cross-app navigation.
+    # Replace with window.location.replace() for a full browser navigation.
+    p, _ = apply_patch_marker(
+        p,
+        "redirectTo:()=>'/app/networkGraph'};",
+        "redirectTo:()=>{window.location.replace('/app/networkGraph');}};",
+        "window.location.replace('/app/networkGraph')",
+        'networkGraph redirectTo: use window.location.replace to bypass hash router'
+    )
 
     # ── Step 2: apps list ─────────────────────────────────────────────────────
     if ',network_graph_app,' in p or ',network_graph_app]' in p:

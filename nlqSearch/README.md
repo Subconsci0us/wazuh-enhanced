@@ -29,7 +29,7 @@ The translated DQL string is also placed back into the search bar so you can see
 
 ## Standalone Page
 
-The dedicated page at `/app/nlqSearch` (accessible from the Wazuh sidebar) provides a richer interface for power users:
+The dedicated page at `/app/nlqSearch` (accessible from the **Explore** section of the OSD sidebar) provides a richer interface for power users:
 - Full Sec-IR JSON visible and editable
 - Raw Wazuh DSL query display
 - Re-transpile button (edit IR, regenerate DSL without another LLM call)

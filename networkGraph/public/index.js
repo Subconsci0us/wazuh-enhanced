@@ -236,7 +236,11 @@ function createGraph(container) {
        link    — pulls connected nodes towards their target distance (120 px).
        charge  — pushes all nodes apart (repulsion strength –300).
        center  — drifts the whole graph towards the canvas centre.
-       collide — prevents nodes from overlapping (radius 35 px). */
+       collide — prevents nodes from overlapping (radius 35 px).
+
+     The simulation is created ONCE here and reused across all poll cycles.
+     On topology-only updates (same nodes, just new edge colors) the simulation
+     is NOT restarted — nodes stay exactly where the user left them. */
   var simulation = d3.forceSimulation()
     .force('link',    d3.forceLink().id(function(d) { return d.id; }).distance(120))
     .force('charge',  d3.forceManyBody().strength(-300))
@@ -246,6 +250,10 @@ function createGraph(container) {
   /* Internal data arrays — updated on each poll cycle. */
   var nodesData = [];
   var linksData = [];
+
+  /* Track which node IDs existed on the previous poll cycle.
+     Used to detect topology changes and decide whether to restart simulation. */
+  var prevNodeIds = new Set();
 
   /* ── Drag behaviour ──────────────────────────────────────────────────────────
      Dragging a node:
@@ -272,13 +280,42 @@ function createGraph(container) {
   }
 
   /* ── update() ────────────────────────────────────────────────────────────────
-     Called on every poll cycle with fresh data.  D3's key-based data join
-     (the second argument to .data()) ensures existing nodes keep their
-     simulated positions — only new or removed nodes are added/removed. */
+     Called on every poll cycle with fresh data.
+
+     POSITION PRESERVATION STRATEGY
+     ═══════════════════════════════
+     D3 stores x/y/vx/vy on node datum objects.  Because we create fresh node
+     objects every cycle, positions would be lost and nodes would "respawn" from
+     random locations.  Fix: snapshot current positions from simulation.nodes()
+     before building the new data, then copy x/y/vx/vy into the new objects.
+     D3 skips randomisation when x/y are already numbers (not NaN).
+
+     SIMULATION RESTART POLICY
+     ═══════════════════════════
+     - Topology unchanged (same agent IDs, only edge colors differ): do NOT
+       restart the simulation.  Edge colors are updated via a CSS transition.
+       Nodes stay exactly where they are.
+     - Topology changed (agent added or removed): restart with alpha(0.1) —
+       a gentle kick that lets new nodes settle without flinging existing ones.
+
+     D3 UPDATE PATTERN
+     ═════════════════
+       enter()  — new nodes fade in (opacity 0 → 1, 400 ms)
+       exit()   — removed nodes fade out (opacity 1 → 0, 400 ms) then remove
+       merge()  — attribute updates on all current nodes (stroke colour, labels)
+       link transitions — edge colour changes animated over 500 ms */
   function update(agents, alertMap) {
 
-    /* Build the manager node.  It always exists and is never in the agents list
-       (Wazuh filters out agent 000 on the browser side). */
+    /* ── Snapshot existing node positions before building new data ── */
+    var posMap = {};
+    simulation.nodes().forEach(function(n) {
+      if (n.id != null) {
+        posMap[n.id] = { x: n.x, y: n.y, vx: n.vx || 0, vy: n.vy || 0 };
+      }
+    });
+
+    /* ── Build manager node (always present, carries position if known) ── */
+    var managerPos = posMap[MANAGER_ID] || {};
     var manager = {
       id:        MANAGER_ID,
       name:      'Wazuh Manager',
@@ -286,10 +323,13 @@ function createGraph(container) {
       os:        'Manager',
       status:    'active',
       isManager: true,
+      x:  managerPos.x,  y:  managerPos.y,
+      vx: managerPos.vx, vy: managerPos.vy,
     };
 
-    /* Map each Wazuh agent API object to a simpler node record. */
+    /* ── Map Wazuh agent records to node objects, carrying over positions ── */
     var agentNodes = agents.map(function(a) {
+      var pos = posMap[a.id] || {};
       return {
         id:        a.id,
         name:      a.name   || 'Agent ' + a.id,
@@ -297,14 +337,25 @@ function createGraph(container) {
         os:        osLabel(a),
         status:    a.status || 'disconnected',
         isManager: false,
+        x:  pos.x,  y:  pos.y,
+        vx: pos.vx, vy: pos.vy,
       };
     });
 
     nodesData = [manager].concat(agentNodes);
 
+    /* ── Detect topology change (agents added or removed) ── */
+    var newNodeIds = new Set(nodesData.map(function(n) { return n.id; }));
+    var topologyChanged = (newNodeIds.size !== prevNodeIds.size);
+    if (!topologyChanged) {
+      newNodeIds.forEach(function(id) {
+        if (!prevNodeIds.has(id)) { topologyChanged = true; }
+      });
+    }
+    prevNodeIds = newNodeIds;
+
     /* ── Agent → manager edges ──
-       One solid line per agent.  Colour is determined by the highest alert
-       level that agent produced in the last 5 minutes. */
+       One solid line per agent.  Colour = highest alert level in last 5 min. */
     var agentLinks = agentNodes.map(function(a) {
       var levels = alertMap[a.id] || [];
       return {
@@ -315,11 +366,7 @@ function createGraph(container) {
       };
     });
 
-    /* ── Agent → agent peer edges ──
-       alertMap._peers is pre-computed by fetchData() from alerts that contain
-       both a srcip and a dstip that belong to two different known agents.
-       These dashed edges indicate lateral movement or direct agent-to-agent traffic.
-       Each peer entry has: { source, target, maxLevel }. */
+    /* ── Agent → agent peer edges ── */
     var peerLinks = (alertMap._peers || []).map(function(p) {
       return {
         source:   p.source,
@@ -333,36 +380,41 @@ function createGraph(container) {
     linksData = agentLinks.concat(peerLinks);
 
     /* ── D3 data join: links ──
-       Key function: source-target-type ensures peer and agent links with the
-       same endpoints don't collide in the join. */
-    var link = linkLayer.selectAll('line').data(linksData, function(d) {
+       Key: source-target-type.  New links appended immediately; existing
+       links get a smooth 500 ms colour transition. */
+    var linkSel = linkLayer.selectAll('line').data(linksData, function(d) {
       return d.source + '-' + d.target + '-' + (d.isPeer ? 'p' : 'a');
     });
 
-    link.enter()
+    var linkEnter = linkSel.enter()
       .append('line')
-      .attr('stroke-width',    function(d) { return d.isPeer ? 1.5 : 2; })
+      .attr('stroke-width',     function(d) { return d.isPeer ? 1.5 : 2; })
       .attr('stroke-dasharray', function(d) { return d.isPeer ? '5,3' : null; })
-      .merge(link)
-        .attr('stroke',     function(d) { return d.color; })
-        // Arrow markers only on peer edges to show communication direction.
-        .attr('marker-end', function(d) {
-          return d.isPeer ? 'url(#arrow-' + d.severity + ')' : null;
-        });
+      .attr('stroke',     function(d) { return d.color; })
+      .attr('marker-end', function(d) {
+        return d.isPeer ? 'url(#arrow-' + d.severity + ')' : null;
+      });
 
-    link.exit().remove();
+    // Update existing edge colours with a smooth transition.
+    linkSel.transition().duration(500)
+      .attr('stroke',     function(d) { return d.color; })
+      .attr('marker-end', function(d) {
+        return d.isPeer ? 'url(#arrow-' + d.severity + ')' : null;
+      });
+
+    linkSel.exit().remove();
 
     /* ── D3 data join: nodes ──
-       Key function: node id.  This preserves simulation positions for nodes
-       that exist across poll cycles (avoids jarring resets every 10 seconds). */
+       Key: node id — D3 matches existing DOM elements to new data by ID so
+       position is never lost for nodes that persist across poll cycles. */
     var node = nodeLayer.selectAll('g.node').data(nodesData, function(d) { return d.id; });
 
     var nodeEnter = node.enter()
       .append('g')
       .attr('class', 'node')
-      .call(drag(simulation))  // Attach drag handler to every new node group.
+      .style('opacity', 0)           // New nodes start invisible for fade-in.
+      .call(drag(simulation))
 
-      /* Tooltip: show on mouseover, follow mouse, hide on mouseout. */
       .on('mouseover', function(event, d) {
         tooltip
           .style('opacity', 1)
@@ -402,13 +454,12 @@ function createGraph(container) {
         .attr('pointer-events', 'none')
         .text('MGR');
 
-    /* ── Agent node: smaller dark circle with OS abbreviation ── */
+    /* ── Agent node: smaller circle with OS abbreviation ── */
     nodeEnter.filter(function(d) { return !d.isManager; })
       .append('circle')
         .attr('r',    16)
         .attr('fill', COLOR_NODE_FILL);
 
-    /* Short OS abbreviation shown inside the agent circle. */
     nodeEnter.filter(function(d) { return !d.isManager; })
       .append('text')
         .attr('text-anchor',  'middle')
@@ -422,10 +473,9 @@ function createGraph(container) {
           if (os.indexOf('ubuntu')  !== -1 || os.indexOf('debian') !== -1)    return 'DEB';
           if (os.indexOf('centos')  !== -1 || os.indexOf('rhel')   !== -1 ||
               os.indexOf('red hat') !== -1)                                    return 'RPM';
-          return 'LNX';  // Default for other Linux distributions.
+          return 'LNX';
         });
 
-    /* Agent name label rendered below the circle. */
     nodeEnter.filter(function(d) { return !d.isManager; })
       .append('text')
         .attr('class',        'namelabel')
@@ -435,11 +485,18 @@ function createGraph(container) {
         .attr('fill',         '#4a5568')
         .attr('pointer-events', 'none');
 
-    /* ── Merge enter + update selections ── */
+    /* Fade in new nodes over 400 ms. */
+    nodeEnter.transition().duration(400).style('opacity', 1);
+
+    /* Fade out removed nodes over 400 ms, then detach from DOM. */
+    node.exit()
+      .transition().duration(400)
+      .style('opacity', 0)
+      .remove();
+
+    /* ── Merge enter + update selections for attribute sync ── */
     var nodeAll = nodeEnter.merge(node);
 
-    /* Update agent circle stroke colour on every poll cycle.
-       Active agents get a teal border; disconnected agents get a grey border. */
     nodeAll.filter(function(d) { return !d.isManager; })
       .select('circle')
         .attr('stroke', function(d) {
@@ -447,32 +504,30 @@ function createGraph(container) {
         })
         .attr('stroke-width', 2.5);
 
-    /* Update name label text (agent name could change between polls). */
     nodeAll.select('text.namelabel')
       .text(function(d) { return d.name; });
 
-    node.exit().remove();
-
-    /* ── Restart force simulation ────────────────────────────────────────────
-       alpha(0.3) gives the simulation a gentle kick so new nodes settle
-       without the whole graph jumping around.  ticked() runs every simulation
-       step and moves the SVG elements to the current computed positions. */
+    /* ── Update simulation data + tick handler ── */
     simulation
       .nodes(nodesData)
       .on('tick', ticked);
 
     simulation.force('link').links(linksData);
-    simulation.alpha(0.3).restart();
+
+    /* Only restart the physics engine when the graph topology changed.
+       For attribute-only updates (edge color, status) positions stay frozen. */
+    if (topologyChanged) {
+      // alpha(0.1): gentle nudge so new nodes settle without flinging existing ones.
+      simulation.alpha(0.1).restart();
+    }
 
     function ticked() {
-      /* Move each line's endpoints to the current node positions. */
       linkLayer.selectAll('line')
         .attr('x1', function(d) { return d.source.x; })
         .attr('y1', function(d) { return d.source.y; })
         .attr('x2', function(d) { return d.target.x; })
         .attr('y2', function(d) { return d.target.y; });
 
-      /* Move each node group to its current position. */
       nodeLayer.selectAll('g.node')
         .attr('transform', function(d) {
           return 'translate(' + d.x + ',' + d.y + ')';
