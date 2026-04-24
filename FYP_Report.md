@@ -342,9 +342,11 @@ The gateway's `POST /analyze` endpoint accepts a JSON body containing a `paramet
 5. Invokes the agent with the analyst's prompt, allowing up to one iteration (`max_iteration=1`) of LLM + tool-call execution.
 6. Returns the agent's final textual response in a structure compatible with OpenSearch ML Commons' `response_filter` path: `$.output.message`.
 
-#### 6.3.2 Google Gemini Provider Extension
+#### 6.3.2 LLM Provider Extensions
 
-The reference architecture documents support for OpenAI GPT and AWS Bedrock Claude. The team extended the gateway to support Google Gemini, which was the primary operational LLM provider used throughout development and testing. Gemini was accessed via its OpenAI-compatible REST endpoint, allowing the LangChain `ChatOpenAI` client to be reused with a provider-specific base URL override:
+The reference architecture documents support for OpenAI GPT and AWS Bedrock Claude. The team extended the gateway to support two additional providers: Google Gemini (used during development) and Groq (current deployed provider).
+
+**Google Gemini** was the primary provider used during development and testing. It is accessed via its OpenAI-compatible REST endpoint, allowing the LangChain `ChatOpenAI` client to be reused with a provider-specific base URL override:
 
 ```python
 ChatOpenAI(
@@ -355,7 +357,18 @@ ChatOpenAI(
 )
 ```
 
-This provider was selected because `gemini-2.5-flash` is available without cost under Google's free-tier API quota. A `gemini-3.1-pro-preview` model was initially considered but requires a paid tier and is not accessible without billing credentials. The provider is selected at runtime via the `LLM_PROVIDER` environment variable; switching providers requires only an environment file update and service restart.
+**Groq** was adopted as the production provider (2026-04-24) to eliminate free-tier rate-limit constraints encountered with Gemini. Groq is similarly accessed via an OpenAI-compatible endpoint:
+
+```python
+ChatOpenAI(
+    model=GROQ_MODEL,            # "qwen/qwen3-32b"
+    temperature=0,
+    base_url="https://api.groq.com/openai/v1",
+    api_key=GROQ_API_KEY,
+)
+```
+
+The `qwen/qwen3-32b` model was selected for its strong instruction-following and reasoning capability. The provider is selected at runtime via the `LLM_PROVIDER` environment variable (`groq` | `gemini` | `openai` | `claude_bedrock`); switching providers requires only an environment file update and service restart. The system prompt was also updated at this time to improve zero-results handling, add high-severity alert detection, and expand the list of recognised compliance frameworks (SOX, NCA ECC, PDPL, DORA, SOC 2 added alongside the existing PECA, PCI DSS, HIPAA, GDPR, NIST).
 
 The three supported providers are:
 
@@ -499,7 +512,7 @@ POST /_plugins/_ml/agents/r5l7WZ0BMG6XxlpYPdEp/_execute
 { "parameters": { "question": "Hello", "verbose": true } }
 ```
 
-The response confirmed successful routing through every tier: ML Commons received the request, forwarded it to the gateway, the gateway invoked Gemini, and the response was returned through the `inference_results` structure. A further test with the production query "Analyze the most important alerts in my environment" produced a coherent response drawn from live indexer data, confirming the full call chain: Dashboard → ML Commons → Gateway → Gemini → MCP Server → Wazuh Indexer → response.
+The response confirmed successful routing through every tier: ML Commons received the request, forwarded it to the gateway, the gateway invoked the configured LLM, and the response was returned through the `inference_results` structure. A further test with the production query "Analyze the most important alerts in my environment" produced a coherent response drawn from live indexer data, confirming the full call chain: Dashboard → ML Commons → Gateway → LLM (Groq `qwen/qwen3-32b`) → MCP Server → Wazuh Indexer → response.
 
 ---
 
@@ -517,7 +530,7 @@ The chatbot system is designed with strict credential compartmentalisation:
 
 **Service accounts:** The OpenSearch MCP Server runs under a dedicated `mcpserver` system user. The MCP-LLM Gateway runs under a dedicated `mcpgateway` system user. Neither user has interactive login privileges. Each service owns only the files it requires and cannot read the other's credentials.
 
-**Credential isolation:** The LLM provider API key (Google Gemini) resides exclusively in `/etc/mcp-llm-gateway/mcp-llm-gateway.env`, owned by `mcpgateway` with permissions mode 640. It is never transmitted to the browser, the Wazuh Dashboard, or OpenSearch. The `GATEWAY_API_KEY` — the credential that ML Commons presents to the gateway — is an independent internal secret registered in the ML Commons connector definition and validated by the gateway's request handler. The complete credential boundary is:
+**Credential isolation:** The LLM provider API key (Groq) resides exclusively in `/etc/mcp-llm-gateway/mcp-llm-gateway.env`, owned by `mcpgateway` with permissions mode 640. It is never transmitted to the browser, the Wazuh Dashboard, or OpenSearch. The `GATEWAY_API_KEY` — the credential that ML Commons presents to the gateway — is an independent internal secret registered in the ML Commons connector definition and validated by the gateway's request handler. The complete credential boundary is:
 
 ```
 Browser
@@ -527,8 +540,8 @@ OSD assistantDashboards plugin
 OpenSearch ML Commons
   ↓ X-API-Key: <GATEWAY_API_KEY>   [internal secret — never in browser]
 MCP-LLM Gateway
-  ↓ Authorization: Bearer <GEMINI_API_KEY>   [LLM key — server-side only]
-Gemini API / LLM Provider
+  ↓ Authorization: Bearer <GROQ_API_KEY>   [LLM key — server-side only]
+Groq API / LLM Provider
 ```
 
 **Network scope:** The gateway listens on `0.0.0.0:9912` but is not exposed through the Wazuh Dashboard's reverse proxy. Access from outside the host requires direct network routing to port 9912, which is not opened in the project's deployment configuration. ML Commons reaches the gateway via the host's internal IP (`10.0.2.15`), covered by the trusted endpoints allowlist.
@@ -547,7 +560,7 @@ The key identifiers and configuration values established during the integration 
 | ML Commons agent ID | `r5l7WZ0BMG6XxlpYPdEp` |
 | Agent name | `mcp-os-agent` |
 | Root agent config key | `os_chat` |
-| LLM provider (primary) | Google Gemini (`gemini-2.5-flash`) |
+| LLM provider (primary) | Groq (`qwen/qwen3-32b`) |
 | Gateway env file | `/etc/mcp-llm-gateway/mcp-llm-gateway.env` |
 | System prompt file | `/etc/mcp-llm-gateway/mcp-llm-gateway.prompt` |
 | MCP tool count | 11 |
@@ -961,12 +974,16 @@ The plugin exposes two analyst interfaces:
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `NLQ_BACKEND` | `gemini` | LLM backend: `gemini` or `ollama` |
-| `GEMINI_API_KEY` | _(required)_ | Google AI Studio API key |
+| `NLQ_BACKEND` | `groq` | LLM backend: `groq` \| `gemini` \| `ollama` |
+| `GROQ_API_KEY` | _(required for groq)_ | Groq API key (console.groq.com) |
+| `GROQ_MODEL` | `llama-3.3-70b-versatile` | Groq model name |
+| `GEMINI_API_KEY` | _(required for gemini)_ | Google AI Studio API key |
 | `GEMINI_MODEL` | `gemini-2.5-flash` | Gemini model name |
 | `OLLAMA_HOST` | `http://localhost:11434` | Ollama server URL (for offline operation) |
-| `OLLAMA_MODEL` | `phi3.5` | Ollama model name (`gemma4:e4b` recommended) |
+| `OLLAMA_MODEL` | `phi3.5` | Ollama model name |
 | `INDEXER_PASSWORD` | _(required)_ | Wazuh Indexer admin password |
+
+Auto-detection: when `NLQ_BACKEND` is not explicitly set, the plugin selects the backend by key presence: Groq → Gemini → Ollama. Groq was added as the preferred default in April 2026 to avoid Gemini free-tier rate limits.
 
 ---
 
@@ -974,7 +991,7 @@ The plugin exposes two analyst interfaces:
 
 ### 9.1 Overview
 
-The Compliance View plugin (`complianceView`) provides a unified dashboard comparing alert coverage across all six compliance frameworks simultaneously: PCI DSS, HIPAA, GDPR, NIST 800-53, TSC, and PECA. It is accessible as a native module within the Wazuh Security Operations sidebar at order 407 (immediately after the PECA module at order 406).
+The Compliance View plugin (`complianceView`) provides a unified dashboard comparing alert coverage across all six compliance frameworks simultaneously: PCI DSS, HIPAA, GDPR, NIST 800-53, TSC, and PECA. It is accessible as a native module within the Wazuh Security Operations sidebar at order 400.5 (between IT Hygiene at order 400 and PCI DSS at order 401).
 
 ### 9.2 Dashboard Components
 
@@ -1053,13 +1070,15 @@ Dark mode is implemented as a CSS injection: toggling the feature appends or rem
 
 ### 10.3 Urdu Localisation
 
-The plugin maintains two locale files (`locales/en.json` and `locales/ur.json`) each containing 46 key-value pairs covering strings from all three custom plugins. Both files are bundled into the webpack output at build time.
+The plugin maintains two locale files (`locales/en.json` and `locales/ur.json`) each containing 68 key-value pairs covering strings from all three custom plugins. Both files are bundled into the webpack output at build time.
 
-Translation is applied via a `TreeWalker` that traverses DOM text nodes and replaces matched strings using pre-built bidirectional `EN_TO_UR` and `UR_TO_EN` maps. A `MutationObserver` on `document.body`, debounced at 150 ms, re-applies the active translation map after any DOM mutation to handle plugin re-renders.
+**Static translation** is applied via a `TreeWalker` that traverses DOM text nodes and replaces matched strings using pre-built bidirectional `EN_TO_UR` and `UR_TO_EN` maps. A `MutationObserver` on `document.body`, debounced at 150 ms, re-applies the active translation map after any DOM mutation to handle plugin re-renders.
+
+**Dynamic string translation** is supported for runtime values (e.g., "3 agent(s) – last updated 12:34") via a `_t(key)` / `_tFmt(key, vars)` helper pair exposed through `window.__fypLocale__`. Each plugin calls `_tFmt()` directly when assembling strings that contain runtime data, bypassing the DOM replacement path. Template keys use `{placeholder}` syntax. This mechanism was added to networkGraph (3 dynamic strings), complianceView (1 dynamic string), and nlqSearch (static only — no dynamic strings require translation).
 
 Right-to-left (RTL) layout is activated when Urdu is selected by adding a `fyp-rtl` CSS class to `document.body`. The injected stylesheet applies `direction: rtl` to content areas while preserving the LTR layout of the header and sidebar.
 
-A global `window.__fypLocale__` API (`{ lang, t(key) }`) is exposed for any custom plugin that wishes to integrate with the localisation system, along with a `fyp-language-changed` window event.
+The `window.__fypLocale__` API (`{ lang, t(key) }`) is set during the plugin's `setup()` lifecycle phase (not `start()`), ensuring it is available immediately during OSD bootstrap before other plugins' `start()` calls fire. A `fyp-language-changed` window event is dispatched on language switches.
 
 ### 10.4 Toolbar Visibility Implementation
 
@@ -1069,7 +1088,7 @@ The toolbar is displayed only on the Wazuh home page (`appId === 'wz-home'`), us
 
 ### 10.5 Known Limitations
 
-- Dynamic strings that concatenate translated text with runtime data (e.g., "42 alert(s) — last updated 14:32") are not translated, as the concatenation produces a composite text node that does not match any static key.
+- Dynamic strings assembled from runtime data are handled via `_tFmt()` in plugin code. Strings that are concatenated outside plugin control (e.g., inside third-party OSD components) remain untranslated.
 - Translation is limited to the three custom FYP plugins; OSD's built-in pages (Discover, Dashboards) are not translated.
 - There may be a brief (≤ 150 ms) flash of English text on plugin re-renders before the MutationObserver re-applies the Urdu translation.
 
@@ -1105,6 +1124,10 @@ sudo bash setup.sh --help                          # usage information
 The script uses `set -uo pipefail` (without `-e`) to prevent a single feature failure from aborting the entire installation. Each feature function returns a non-zero exit code on failure; the main installation loop catches failures, continues with remaining features, and prints a summary table at completion.
 
 Most steps are idempotent: existing Wazuh installations are detected and skipped; bundle patches check for marker strings before applying; service accounts are not recreated if they already exist. The Wazuh Dashboard is restarted once at the end of all feature installations rather than after each individual feature.
+
+A `resolve_wazuh_passwords()` helper runs before the feature loop. It searches for `wazuh-install-files.tar` in four known locations and falls back to a filesystem search; on success it exports `WAZUH_API_PASSWORD` (used by `networkGraph`) and `WAZUH_INDEXER_PASSWORD` (used by `nlqSearch` and `complianceView`). Each plugin's install script reads these exported variables, eliminating the need for manual password entry on fresh deployments. If the tar is not found, each plugin prints a specific warning and continues without blocking the other features.
+
+Bundle-patch scripts (`patch_plugin.py`, `patch_bundles.py`) now use a position-based fallback in addition to string anchors. If no string anchor matches the installed bundle state, the fallback locates the apps array by finding a stable identifier (`ITHygiene`) and inserts the new entry before `].sort(`. Failure of the fallback exits non-zero, surfacing the error in the installation summary rather than silently producing a broken installation.
 
 ### 11.4 Docker-Based Validation
 
@@ -1219,6 +1242,43 @@ An additional complication was that Firefox continued to serve a stale cached co
 
 ---
 
+### 12.10 Network Graph — Blank `WAZUH_API_PASSWORD` on Every Fresh Install (AWS)
+
+**Symptom (AWS EC2, 2026-04-24):** Every request to `/api/network_graph/agents` and `/api/network_graph/alerts` returned HTTP 401. The graph page rendered with nodes but showed no edges or data.
+
+**Cause:** `networkGraph/install.sh` wrote the server-side `.env` with `WAZUH_API_PASSWORD=` (empty). A fresh Wazuh install generates a unique `wazuh-wui` API password for each machine (stored inside `wazuh-install-files.tar`). The script never resolved this password; the default fallback in `routes/index.js` uses the local VM's password (`v86bPF+u+2nph5LxghIFWivBr87qPgJL`), which is machine-specific and incorrect on any other deployment.
+
+**Resolution:** `install.sh` now resolves the password in three steps: (1) reads `$WAZUH_API_PASSWORD` if already exported by `setup.sh`'s `resolve_wazuh_passwords()`; (2) searches the filesystem for `wazuh-install-files.tar` and parses the password from it; (3) writes a blank password with a clear warning only if both steps fail. The correct password on the EC2 instance (`7J*.Qv+5y4w1LbJAtzkJa7W5l*Hx2PTk`) was resolved from `/home/ubuntu/old-wazuhfyprepo/wazuh-install-files.tar` and written to the plugin `.env`.
+
+---
+
+### 12.11 Network Graph — Sidebar Entry Missing After `setup.sh` Re-Run (AWS)
+
+**Symptom (AWS EC2, 2026-04-24):** After re-running `setup.sh` to apply April 24 updates, the Network Graph entry did not appear in the Wazuh sidebar under Threat Intelligence. Navigating directly to `/app/networkGraph` worked, confirming the plugin loaded correctly.
+
+**Cause:** `patch_plugin.py` had two string anchors for inserting `network_graph_app` into the Wazuh apps array. Both failed silently on the EC2 bundle:
+- Primary anchor (`compliance_overview_app,devTools`) — no match; EC2 bundle had no `devTools` after `compliance_overview_app`.
+- Fallback anchor (`ITHygiene].sort(`) — no match; EC2 bundle had `ITHygiene,compliance_overview_app].sort(` (complianceView had already been patched in a previous run, inserting `compliance_overview_app` between `ITHygiene` and `].sort(`).
+
+Critically, the failure path printed `[WARN]` to stderr and exited 0. `setup.sh` interpreted the 0 exit as success and logged the feature as `[OK]`. The broken state was invisible in the installation summary.
+
+**Resolution:** Three changes were applied:
+1. A third string anchor was added: `,compliance_overview_app].sort(` → `,compliance_overview_app,network_graph_app].sort(`.
+2. A position-based fallback (`_insert_in_apps_list_by_position`) was added as the final safety net. It locates the apps array by finding `,ITHygiene` (stable across all 4.14.x bundles) and the next `].sort(` after it, inserting `network_graph_app` regardless of what other entries precede `].sort(`.
+3. Failure of the position-based fallback now exits 1, causing `setup.sh` to mark networkGraph as `[FAILED]` instead of silently continuing.
+
+---
+
+### 12.12 AI Assistant — OpenSearch Disk Circuit Breaker (AWS EC2)
+
+**Symptom (AWS EC2, 2026-04-24):** The AI chat panel returned `CircuitBreakingException: Disk Circuit Breaker is open` on every query, blocking all ML Commons agent execution.
+
+**Cause:** EC2 disk usage was at 91% (34 GB used of 38 GB). The OpenSearch disk circuit breaker trips above the high watermark (default 90%) and blocks all write and ML operations. Investigation found 16 GB consumed by a previously installed Ollama service and its downloaded Gemma model (`/usr/share/ollama`: 11 GB; `/usr/local/lib/ollama`: 4.9 GB). Ollama was no longer in use after the Groq migration.
+
+**Resolution:** The Ollama service was stopped and disabled; the Ollama binary, libraries, and model cache were removed. Disk usage dropped from 91% to 51%. The OpenSearch disk threshold check was toggled via the Cluster Settings API to clear the circuit-breaker state. Subsequent agent execution confirmed end-to-end functionality restored.
+
+---
+
 ## 13. Testing and Validation
 
 ### 13.1 Plugin Load Verification
@@ -1253,11 +1313,13 @@ POST /_plugins/_ml/agents/<agent_id>/_execute
 {"parameters": {"question": "Analyze the most important alerts in my environment"}}
 ```
 
-The response was routed through the complete chain (ML Commons → MCP-LLM Gateway → Gemini → MCP Server → Wazuh Indexer) and a natural-language response was returned, confirming end-to-end connectivity.
+The response was routed through the complete chain (ML Commons → MCP-LLM Gateway → Groq `qwen/qwen3-32b` → MCP Server → Wazuh Indexer) and a natural-language response was returned, confirming end-to-end connectivity.
+
+The gateway's `/health` endpoint was used as a lightweight operational check: it performs a live LLM invocation and attempts a tool-catalogue fetch from the MCP server, returning a structured status for all three components (`gateway`, `llm`, `mcp`). On the AWS EC2 deployment, this check revealed a `CircuitBreakingException` caused by disk exhaustion (see Section 12.12) which was resolved before functional testing continued.
 
 ### 13.5 NLQ Translation Test
 
-The NLQ translate route was tested via `curl` with a Gemini API key configured, confirming that the LLM returned a valid Sec-IR JSON on the first attempt (zero correction rounds) for several representative queries.
+The NLQ translate route was tested via `curl` with a Groq API key configured (`NLQ_BACKEND=groq`), confirming that the LLM returned a valid Sec-IR JSON on the first attempt (zero correction rounds) for several representative queries. The Groq backend was added alongside the existing Gemini and Ollama backends; auto-detection prioritises Groq when `GROQ_API_KEY` is set.
 
 ### 13.6 Testing Gaps
 
@@ -1282,7 +1344,7 @@ _[The following tests are either pending or were not completed at the time of do
 
 **Localisation scope**: The Urdu translations cover only the 46 strings present in the three custom FYP plugins. OSD's built-in pages (Discover, Management, Dashboards) are not translated. Dynamic strings assembled at runtime from translated fragments and data values are not translatable by the current DOM text-node replacement approach.
 
-**AI assistant model dependency**: The chatbot depends on a third-party LLM API (Gemini, OpenAI, or AWS Bedrock). Response quality, latency, and availability are determined by the external provider. The `gemini-2.5-flash` model was chosen for its free-tier availability; production deployments would benefit from a paid tier to avoid rate limits.
+**AI assistant model dependency**: The chatbot depends on a third-party LLM API (Groq, OpenAI, Gemini, or AWS Bedrock). Response quality, latency, and availability are determined by the external provider. The current deployment uses Groq's `qwen/qwen3-32b` model; Groq was adopted as the primary provider after Gemini's free-tier rate limits were reached during testing.
 
 **No agent-to-agent edge validation**: The network graph's peer-edge logic — which infers agent-to-agent connections from alert `srcip`/`dstip` fields — could not be validated during development because the test environment had no agents generating alerts with IP fields. The logic is implemented but untested against live data.
 
@@ -1294,7 +1356,7 @@ _[The following tests are either pending or were not completed at the time of do
 4. **Performance benchmarking** — measure NLQ translation latency (LLM call + transpilation + execution) under varying query complexity and alert volume.
 5. **Automated testing** — develop a test harness using `wazuh-logtest` for all PECA rules and a mock LLM backend for NLQ pipeline unit tests.
 6. **Urdu translation expansion** — extend the locale files to cover dynamic strings and built-in Wazuh module page text.
-7. **AWS deployment hardening** — the EC2 deployment exposed the PECA sidebar issue and a JS syntax error in the bundle patch; add pre-deployment patch validation (Node.js `vm.Script` parse check) to the install script.
+7. **AWS deployment hardening** — the EC2 deployment exposed two installation robustness issues: (a) `patch_plugin.py`'s apps-list step previously exited 0 with a `[WARN]` when no string anchor matched the bundle state, silently producing a broken installation; this was fixed by adding a third string anchor, a position-based fallback (locating `ITHygiene` then `].sort(`) that works on any Wazuh 4.14.x bundle variant, and replacing the silent exit with `sys.exit(1)` so `setup.sh` surfaces failures; (b) `install.sh` wrote a blank `WAZUH_API_PASSWORD` when the env var was not pre-exported, preventing Wazuh API calls; this was fixed by auto-resolving the password from `wazuh-install-files.tar` at install time. A remaining improvement is to add pre-deployment patch validation (Node.js `vm.Script` parse check) to the install script to catch JS syntax errors before restarting the dashboard service.
 
 ---
 
@@ -1304,7 +1366,7 @@ This project has successfully delivered a functionally complete AI-enhanced SIEM
 
 The technical difficulty of this project warrants emphasis. The development team operated without access to the Wazuh plugin build toolchain, requiring all custom plugins to be built against OSD's generic bundle system using a standalone webpack configuration. The integration of custom modules into Wazuh's sidebar navigation required systematic reverse-engineering of pre-compiled, minified JavaScript bundles, followed by precise byte-level patching and recompression. The NLQ pipeline required a faithful JavaScript reimplementation of a Python reference codebase, including a zero-dependency schema validator and a deterministic DSL transpiler. Multiple incidents involving corrupted bundles, masked browser caching, and LLM garbage output required methodical diagnosis across multiple layers of the stack.
 
-The resulting system is deployable in full via a single idempotent script on a clean Ubuntu 24.04 LTS or Linux Mint 22 host, has been validated against a clean Wazuh Docker environment, and has been successfully deployed to an AWS EC2 instance. The work demonstrates that meaningful intelligence augmentation of an enterprise-grade SIEM platform is achievable within the scope of a final year undergraduate project, even in the presence of significant architectural constraints.
+The resulting system is deployable in full via a single idempotent script on a clean Ubuntu 24.04 LTS or Linux Mint 22 host, has been validated against a clean Wazuh Docker environment, and has been successfully deployed to an AWS EC2 instance. The AWS deployment surfaced and resolved two installation hardening issues — a silent patch failure in the network graph sidebar registration and a blank API credential in the plugin `.env` — both of which have been corrected in the repository so that subsequent deployments via `setup.sh` are fully automated. The AI assistant currently runs on Groq's `qwen/qwen3-32b` model via an OpenAI-compatible endpoint, with Gemini and a local Ollama backend available as fallback providers. The work demonstrates that meaningful intelligence augmentation of an enterprise-grade SIEM platform is achievable within the scope of a final year undergraduate project, even in the presence of significant architectural constraints.
 
 ---
 

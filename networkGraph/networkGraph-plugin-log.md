@@ -1666,3 +1666,104 @@ Added `_t()` / `_tFmt()` localisation helpers to `public/index.js`. Replaced thr
 All static UI strings (title, legend labels, filter options, sidebar header, empty-state message) were added to `localization/locales/en.json` and `ur.json` for DOM text-replacement coverage.
 
 **Rebuild required:** `sudo bash install.sh`
+
+---
+
+## 2026-04-24 — Bug investigation on AWS EC2 deployment
+
+### Issues found (AWS EC2 `ec2-16-170-236-3.eu-north-1.compute.amazonaws.com`)
+
+Two bugs were identified that together prevent the Network Graph from appearing in the sidebar and from loading data.
+
+---
+
+#### Bug 1 — `WAZUH_API_PASSWORD` always blank after fresh install
+
+**Symptom:** Every request to `/api/network_graph/agents` and `/api/network_graph/alerts` returns HTTP 401 continuously. The graph page renders but shows no nodes.
+
+**Root cause:** `install.sh` writes the server `.env` with `WAZUH_API_PASSWORD=` (empty). A fresh Wazuh install generates a unique `wazuh-wui` password that differs on every machine (stored in `wazuh-install-files.tar`). The script never resolved it, so the plugin could never authenticate against the Wazuh API.
+
+On AWS the generated password was `7J*.Qv+5y4w1LbJAtzkJa7W5l*Hx2PTk` (from `/home/ubuntu/old-wazuhfyprepo/wazuh-install-files.tar`) — entirely different from the local VM password hardcoded in the fallback.
+
+**Fix:** `install.sh` now auto-resolves `WAZUH_API_PASSWORD` in three steps:
+1. Uses `$WAZUH_API_PASSWORD` env var if already exported (set by `setup.sh`'s `resolve_wazuh_passwords`).
+2. Falls back to searching for `wazuh-install-files.tar` on the filesystem and parsing `wazuh-passwords.txt` from it.
+3. Only writes a blank password (with a clear warning) if both steps fail.
+
+---
+
+#### Bug 2 — `network_graph_app` defined but never added to the Wazuh apps list
+
+**Symptom:** Network Graph does not appear in the Wazuh sidebar under Threat Intelligence, and does not appear on the Wazuh Overview page's Threat Intelligence card. Navigating directly to `/app/networkGraph` works, confirming the plugin itself loaded fine.
+
+**Root cause:** `patch_plugin.py` has two anchors to insert `network_graph_app` into the apps array in `wazuh.plugin.js`:
+- Primary: `,compliance_overview_app,devTools,`
+- Fallback: `,about,ITHygiene].sort(`
+
+On AWS, neither anchor matched because the bundle had already been patched by `complianceView` before `networkGraph` was installed. The actual apps array on EC2 was:
+
+```
+,about,ITHygiene,compliance_overview_app].sort(
+```
+
+`compliance_overview_app` was inserted into the array (before `].sort(`) but the primary anchor expected `devTools` to follow it, and the fallback expected `ITHygiene` to be the last entry before `].sort(`. Both checks silently fell through — the `network_graph_app` constant was injected into the file but never wired into the array.
+
+**Fix:** Added a third anchor to `patch_plugin.py`:
+- `,compliance_overview_app].sort(` → `,compliance_overview_app,network_graph_app].sort(`
+
+Anchor priority order is now:
+1. `compliance_overview_app,devTools` variant (original fresh-bundle format)
+2. `compliance_overview_app].sort` variant (after complianceView has already patched the array)
+3. `ITHygiene].sort` fallback (fresh bundle, complianceView not yet installed)
+4. WARN if none found
+
+---
+
+### Fix applied on EC2
+
+- `WAZUH_API_PASSWORD=7J*.Qv+5y4w1LbJAtzkJa7W5l*Hx2PTk` written to `/usr/share/wazuh-dashboard/plugins/networkGraph/server/.env`
+- `patch_plugin.py` re-run on EC2 — applied apps list anchor #2 (`compliance_overview_app].sort` variant)
+- `wazuh.plugin.js.gz` and `.br` regenerated
+- `wazuh-dashboard` restarted
+
+### Status: FIXED — both bugs resolved in repo scripts and on AWS instance.
+
+---
+
+## 2026-04-24 — Robustness fix: patch_plugin.py apps list failure mode
+
+### Problem
+
+When `setup.sh` was re-run on 2026-04-24 (AWS EC2) to apply updates from the April 21 install, the networkGraph sidebar entry still did not appear. The patch script had applied the `network_graph_app` constant successfully on the first run, but silently failed to insert it into the apps array on both runs.
+
+Two compounding issues:
+
+1. **Silent failure** — when no string anchor matched the apps list, the script printed `[WARN]` and exited 0. `setup.sh` saw exit 0, marked networkGraph as `ok`, and continued. The broken state was invisible until someone noticed the sidebar entry was missing.
+
+2. **Fragile string anchors** — the apps list anchors were written against the specific bundle state on the local VM. On EC2 the bundle variant had a different arrangement (complianceView was already inserted at the end, before `].sort(`), so none of the two anchors matched.
+
+### Fix
+
+Replaced the silent `[WARN]` exit path with a **position-based fallback**:
+
+```python
+def _insert_in_apps_list_by_position(p):
+    ith_pos = p.find(',ITHygiene')       # stable unique identifier in every 4.14.x bundle
+    sort_pos = p.find('].sort(', ith_pos)
+    return p[:sort_pos] + ',network_graph_app' + p[sort_pos:], True
+```
+
+`ITHygiene` and `].sort(` are stable across all Wazuh 4.14.x bundle variants regardless of install order. If no string anchor matches, this fallback finds the apps array by position and inserts `network_graph_app` before the closing `].sort(` — handling any combination of previously patched entries.
+
+If even the position-based fallback fails (ITHygiene not found), the script now **exits 1** instead of continuing silently, causing `setup.sh` to mark networkGraph as `[FAILED]` and print a visible error.
+
+Anchor priority order after this fix:
+1. `,compliance_overview_app,devTools,` — original local VM bundle state
+2. `,compliance_overview_app].sort(` — EC2 bundle state (complianceView last before sort)
+3. `,about,ITHygiene].sort(` — fresh bundle, complianceView not yet installed
+4. Position-based via ITHygiene → `].sort(` — any other variant
+5. `exit 1` — unrecognisable bundle (loud failure, not silent corruption)
+
+### Verified on EC2
+
+Re-running `patch_plugin.py` on the already-patched EC2 bundle produces all `[SKIP]` — idempotent confirmed.

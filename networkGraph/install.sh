@@ -91,17 +91,49 @@ cp "${BUILD_DIR}/server/routes/index.js"     "${INSTALL_DIR}/server/routes/"
 cp "${BUNDLE}" "${INSTALL_DIR}/target/public/"
 
 # Write .env — credentials are read at runtime via load_env.js
+# Auto-resolve WAZUH_API_PASSWORD from (in order of preference):
+#   1. $WAZUH_API_PASSWORD env var (exported by setup.sh's resolve_wazuh_passwords)
+#   2. wazuh-install-files.tar found anywhere on the filesystem
+#   3. Empty string with a clear warning (manual action required)
 ENV_FILE="${INSTALL_DIR}/server/.env"
 if [ ! -f "${ENV_FILE}" ]; then
-  cat > "${ENV_FILE}" <<'ENVEOF'
+  _API_PASS="${WAZUH_API_PASSWORD:-}"
+
+  if [ -z "$_API_PASS" ]; then
+    # Search for wazuh-install-files.tar in common locations first, then broader search
+    _TAR=""
+    for _loc in \
+        "${HOME}/wazuh-install-files.tar" \
+        "/root/wazuh-install-files.tar" \
+        "/tmp/wazuh-install-files.tar" \
+        "${HOME}/old-wazuhfyprepo/wazuh-install-files.tar"; do
+      [ -f "$_loc" ] && _TAR="$_loc" && break
+    done
+    if [ -z "$_TAR" ]; then
+      _TAR=$(find / -maxdepth 6 -name "wazuh-install-files.tar" -type f 2>/dev/null | head -1)
+    fi
+
+    if [ -n "$_TAR" ]; then
+      _API_PASS=$(tar -xOf "$_TAR" wazuh-install-files/wazuh-passwords.txt 2>/dev/null \
+        | grep -A1 "api_username: 'wazuh-wui'" \
+        | grep "api_password:" \
+        | sed "s/.*api_password: '//;s/'.*//")
+      [ -n "$_API_PASS" ] && echo "      Resolved WAZUH_API_PASSWORD from $_TAR"
+    fi
+  fi
+
+  cat > "${ENV_FILE}" <<ENVEOF
 WAZUH_API_HOST=localhost
 WAZUH_API_PORT=55000
 WAZUH_API_USER=wazuh-wui
-WAZUH_API_PASSWORD=
+WAZUH_API_PASSWORD=${_API_PASS}
 ENVEOF
-  echo "      WARNING: WAZUH_API_PASSWORD not set in ${ENV_FILE}"
-  echo "      Edit that file and set WAZUH_API_PASSWORD, then restart wazuh-dashboard."
-  echo "      Find the password in wazuh-passwords.txt (wazuh-wui entry)."
+
+  if [ -z "$_API_PASS" ]; then
+    echo "      WARNING: WAZUH_API_PASSWORD could not be resolved — ${ENV_FILE} has blank password."
+    echo "      Edit that file and set WAZUH_API_PASSWORD manually, then restart wazuh-dashboard."
+    echo "      Find the password with: tar -xOf wazuh-install-files.tar wazuh-install-files/wazuh-passwords.txt"
+  fi
 else
   echo "      ${ENV_FILE} already exists — skipping."
 fi

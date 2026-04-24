@@ -495,3 +495,43 @@ sudo systemctl restart mcp-llm-gateway
 ### Status
 
 Prompt file updated. No code changes required. Untested on live instance — restart required to pick up new prompt.
+
+---
+
+## Session — 2026-04-24
+
+**Developer:** Claude Sonnet 4.6
+**Target:** EC2 deployment + repo source
+**Scope:** Switch AI assistant LLM provider from Gemini to Groq (qwen3-32b)
+
+---
+
+### Changes Made
+
+**Reason:** Gemini was the active provider; switching to Groq with the `qwen3-32b` model per team decision.
+
+**Files changed:**
+
+1. `ai-assistant/mcp-llm-gateway.env.example`
+   - `LLM_PROVIDER` changed from `"gemini"` → `"groq"`
+   - `GROQ_MODEL` changed from `"llama-3.3-70b-versatile"` → `"qwen3-32b"`
+   - Groq API key already present in the file
+
+**EC2 running config updated:**
+- `/etc/mcp-llm-gateway/mcp-llm-gateway.env` on `ec2-16-170-236-3.eu-north-1.compute.amazonaws.com`
+  - Added `GROQ_API_KEY`, `GROQ_MODEL="qwen3-32b"`, set `LLM_PROVIDER="groq"`
+- `mcp-llm-gateway` service restarted — confirmed `active (running)`
+
+**Groq API key:** `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` (stored in `/media/sf_sharedfolderclone/groq.txt` and in `mcp-llm-gateway.env.example`)
+
+**Credentials:** EC2 SSH key at `/media/sf_sharedfolderclone/credentials.pem`
+
+### To apply on a new machine
+
+`setup.sh` will use `mcp-llm-gateway.env.example` as the base config when the gateway env is not yet populated — it will automatically get `LLM_PROVIDER=groq` and `GROQ_MODEL=qwen3-32b` from the example file.
+
+---
+
+### Status
+
+Repo updated. EC2 config updated and service restarted — active and running with Groq/qwen3-32b.
