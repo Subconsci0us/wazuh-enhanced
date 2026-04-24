@@ -232,11 +232,16 @@ function defineRoutes(router, logger) {
 
   /* ── GET /api/network_graph/alerts ─────────────────────────────────────────
      Returns up to 500 alerts from the last 5 minutes, newest first.
-     Fields: agent.id, rule.level, data.srcip, data.dstip, data.src_ip, data.dst_ip.
+     Fields: agent.id, agent.name, rule.level, rule.id, rule.description,
+             rule.groups, data.srcip, data.dstip, data.src_ip, data.dst_ip, timestamp.
 
      The browser uses:
-       - rule.level   → to colour each agent's edge to the manager
-       - src/dst IPs  → to draw dashed agent-to-agent edges (lateral movement)
+       - rule.level       → to colour each agent's edge to the manager
+       - src/dst IPs      → to draw dashed agent-to-agent edges (lateral movement)
+       - rule.description → incident sidebar title
+       - rule.groups      → incident sidebar group chips
+       - agent.name       → incident sidebar source label
+       - timestamp        → incident sidebar relative time display
   ────────────────────────────────────────────────────────────────────────── */
   router.get(
     {
@@ -250,7 +255,7 @@ function defineRoutes(router, logger) {
         const alertPath =
           '/alerts' +
           '?limit=500' +
-          '&select=agent.id,rule.level,data.srcip,data.dstip,data.src_ip,data.dst_ip' +
+          '&select=agent.id,agent.name,rule.level,rule.id,rule.description,rule.groups,data.srcip,data.dstip,data.src_ip,data.dst_ip,timestamp' +
           '&q=timestamp>' + encodeURIComponent(fiveMinutesAgo) +
           '&sort=-timestamp';  // Newest first — ensures most-recent alerts survive the limit.
 

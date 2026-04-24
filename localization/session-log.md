@@ -196,4 +196,159 @@ Built, installed, compressed variants regenerated, dashboard restarted. ✓
 ### Build & install
 - Built in /tmp/localization-build (`webpack compiled successfully`)
 - Installed to `/usr/share/wazuh-dashboard/plugins/localization/target/public/localization.plugin.js`
-- Wazuh-dashboard restarted
+- Wazuh-dashboard restarted — service active ✓
+
+### Cross-plugin theme coordination
+
+The `fyp-theme-changed` CustomEvent dispatched by `setDarkMode()` is consumed by:
+- `networkGraph/public/index.js` — toggles `.dark-theme` on its SVG canvas root
+- `complianceView/public/index.js` — toggles `.dark-theme` on `.cv-root`
+- `complianceView/patch_bundles.py` MOUNT_FN — toggles `.dark-theme` on `.cv-ov`
+
+All three listeners call `window.removeEventListener` on unmount to avoid memory leaks.
+
+---
+
+## 2026-04-24 — install.sh updated to be fully documented
+
+`localization/install.sh` rewritten to:
+- Document dual EN/UR buttons (always visible, no toggle-based approach)
+- Document active button style: `background:#3b82f6; color:#fff` (solid blue)
+- Document inactive button style: `transparent; color:#94a3b8; border:#475569` (muted outline)
+- Document that theme button is hidden (`display:none`) — TEMPORARY
+- Document `fyp_theme_v2` default of `'light'`
+- Document `fyp-theme-changed` CustomEvent — how other plugins react to it
+- Matches localization/README.md for consistent documentation
+
+No source code changes in this session — documentation and install.sh only.
+
+---
+
+## 2026-04-24 — Comprehensive Urdu translation coverage
+
+**Developer:** Claude Sonnet 4.6
+**Scope:** Expand en.json and ur.json to cover all visible UI strings across all three plugins
+
+### Problem
+
+The DOM text-replacement system (TreeWalker + MutationObserver) only translates strings whose exact text node content is present as a value in en.json. Many strings in networkGraph, nlqSearch, and complianceView were missing from the locale files, so they remained in English when Urdu mode was active.
+
+### What changed
+
+#### localization/locales/en.json — 18 new keys added
+
+| Key | String |
+|-----|--------|
+| `ng.title.full` | `⛎ Wazuh Network Graph` (with emoji, matches DOM text node) |
+| `ng.legend.peer.full` | `┅┅ Agent-to-agent (peer)` (with box-drawing chars) |
+| `ng.sidebarTitle` | `Recent Incidents` |
+| `ng.waitingData` | `Waiting for data…` |
+| `ng.allSeverities` | `All severities` |
+| `ng.highPlus` | `High+ (≥12)` |
+| `ng.mediumPlus` | `Medium+ (≥7)` |
+| `ng.emptyLine1` | `No incidents in the last 5 minutes.` |
+| `ng.emptyLine2` | `System is quiet.` |
+| `ng.showAll` | `Show all {count} incidents` (template — used via `_tFmt()`) |
+| `ng.lastRefresh` | `Last refresh: {time}` (template) |
+| `ng.agentsStatus` | `{count} agent(s) – last updated {time}` (template) |
+| `nlq.title.full` | `🔍 NLQ Search` (with emoji) |
+| `nlq.busy.translating` | `Translating…` |
+| `nlq.busy.transpiling` | `Transpiling…` |
+| `nlq.dslInputTitle` | `Wazuh DSL Query (JSON)` |
+| `nlq.runningQuery` | `Running query…` |
+| `nlq.notSecurity` | `Not a security query — please enter a security detection request.` |
+| `cv.loadingFrameworks` | `Loading frameworks…` |
+| `cv.overlapDesc` | Full overlap section description paragraph |
+| `cv.matrixLegend` | Matrix diagonal/off-diagonal legend line |
+| `cv.lastUpdated` | `Last updated: {time}` (template) |
+
+All new keys have corresponding Urdu translations in ur.json.
+
+#### localization/locales/ur.json — 18 new keys added (all correct Urdu)
+
+Selected translations of note:
+- `ng.sidebarTitle`: حالیہ واقعات
+- `ng.waitingData`: ڈیٹا کا انتظار ہے…
+- `ng.allSeverities`: تمام شدتیں
+- `ng.emptyLine1`: گزشتہ 5 منٹ میں کوئی واقعہ نہیں۔
+- `ng.emptyLine2`: نظام پرسکون ہے۔
+- `nlq.notSecurity`: یہ سیکیورٹی سے متعلق سوال نہیں — براہ کرم سیکیورٹی درخواست درج کریں۔
+- `cv.overlapDesc`: ہر خانہ ظاہر کرتا ہے کہ منتخب وقت کی حد میں کتنے الرٹس نے ایک ساتھ دونوں فریم ورکس میں خلاف ورزی کی۔ زیادہ اوورلیپ کا مطلب ہے کہ ایک واقعہ کا متعدد ضابطوں پر اثر پڑا۔
+- `cv.matrixLegend`: قطری = اس فریم ورک کے کل الرٹس۔ غیر قطری = ایک ساتھ دونوں فریم ورکس کو متاثر کرنے والے الرٹس۔
+
+### Why DOM replacement isn't enough for dynamic strings
+
+The TreeWalker replaces text nodes whose trimmed content exactly matches an en.json value. Dynamic strings like `"3 agent(s) – last updated 12:34:56 PM"` contain runtime values and will never match any static locale key. Template keys (with `{placeholders}`) require plugin-side code to call `_tFmt()`.
+
+### Plugin code changes
+
+Two plugins were updated with a `_t()` / `_tFmt()` helper pair and had their dynamic string concatenations replaced:
+
+**networkGraph/public/index.js** (3 lines changed):
+- `showAllBtn.textContent`: now uses `_tFmt('ng.showAll', { count })`
+- `subtitleEl.textContent`: now uses `_tFmt('ng.lastRefresh', { time })`
+- `statusEl.textContent` (agent count): now uses `_tFmt('ng.agentsStatus', { count, time })`
+
+**complianceView/public/index.js** (1 line changed):
+- `refs.statusEl.textContent`: now uses `_tFmt('cv.lastUpdated', { time })`
+
+nlqSearch required no code changes — all its visible strings are static and handled by DOM replacement once added to locale files.
+
+### Strings NOT translated (intentional)
+
+- Tooltip labels inside the D3 graph (`"ID:"`, `"IP:"`, `"OS:"`, `"Status:"`) — concatenated with live API data, can't match statically
+- Error messages that include dynamic API error text
+- `"toolbar.switchToEn": "Switch to English"` in ur.json — kept in English intentionally (label for English speakers switching back)
+
+### Rebuild required
+
+All three affected plugins plus the localization plugin must be rebuilt for changes to take effect:
+
+```bash
+sudo bash /media/sf_sharedfolderclone/wazuh-fyp-repo/localization/install.sh
+sudo bash /media/sf_sharedfolderclone/wazuh-fyp-repo/networkGraph/install.sh
+sudo bash /media/sf_sharedfolderclone/wazuh-fyp-repo/nlqSearch/install.sh
+sudo bash /media/sf_sharedfolderclone/wazuh-fyp-repo/complianceView/install.sh
+```
+
+Or run the master install script:
+```bash
+sudo bash /media/sf_sharedfolderclone/wazuh-fyp-repo/setup.sh
+```
+
+### Status
+
+Source files updated. Rebuild required. Untested on live instance.
+
+---
+
+## 2026-04-24 — Session 3: failsafes + deployment
+
+### Changes
+
+**complianceView/public/index.js** — Added `_CV_EN` English fallback map to `_t()`:
+```js
+var _CV_EN = { 'cv.lastUpdated': 'Last updated: {time}' };
+function _t(key) {
+  return (window.__fypLocale__ && window.__fypLocale__.t(key)) || _CV_EN[key] || key;
+}
+```
+Prevents key-name bleed-through when localization plugin is absent (same fix already applied to networkGraph in this session).
+
+**localization/public/index.js** — Moved `window.__fypLocale__` assignment from `start()` into `setup()` so the object is available immediately during OSD bootstrap, before `start()` fires. `start()` now just updates `.lang` to keep it current.
+
+**setup.sh** — Added localization dependency check after `FEATURES_TO_RUN` is built. If any UI plugin (networkGraph/nlqSearch/complianceView) is selected but `localization` is not, a prominent yellow warning box is printed before installation begins.
+
+**localization/README.md** — Updated key count 46→68; removed outdated "dynamic strings not translated" limitation; added `_t()/_tFmt()` pattern section for plugin developers; noted `__fypLocale__` is now set in `setup()`.
+
+**README.md (root)** — Added `localization` row to features table; added "Localization dependency" callout explaining that UI plugins require the localization plugin for Urdu support.
+
+### Deployment
+
+All four plugins rebuilt and reinstalled:
+- localization  — OK
+- networkGraph  — OK
+- nlqSearch     — OK
+- complianceView — OK
+
+All four `wazuh-dashboard` restarts reported `active`. Deployment complete.

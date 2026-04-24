@@ -535,3 +535,101 @@ Bundle built and committed to repo. ✓
   - peca app def + apps list: OK
 - Compressed assets regenerated: `wazuh.chunk.2.js.gz`, `.br`, `wazuh.plugin.js.gz`, `.br`
 - Wazuh-dashboard restarted — service active
+
+---
+
+## 2026-04-24 — peca_app duplicate removal, order 400.5, install.sh end-to-end
+
+### Issue 1: "An application is already registered with the id 'peca'"
+
+**Symptom:** After cache clear, browser showed OSD fatal error:
+`Error: An application is already registered with the id 'peca'`
+
+**Root cause:** A prior session (2026-04-22) had added `const peca_app={...id:"peca"...}` 
+directly to `wazuh.plugin.js` via a separate `/tmp/patch_peca_plugin.py`. The new 
+`patch_bundles.py` checks for marker `const peca=` (no `_app` suffix) — since `peca_app` 
+doesn't match, it inserted a second `const peca={...id:"peca"...}` block. Both ended up 
+in the apps list, causing OSD to throw a duplicate-id error on startup.
+
+**Fix in `patch_bundles.py`** — Step 7a-pre added:
+- Locates `const peca_app=` block in wazuh.plugin.js and removes it entirely (up to the
+  `}};const peca=` boundary or falls back gracefully if boundary not found)
+- Removes `,peca_app,` or `,peca_app]` from the apps list
+- Runs before Step 7a (peca constant insertion) so the slate is clean
+
+### Issue 2: compliance_overview_app order 400.5
+
+**Change:** `CO_APP` constant order changed from `407` to `400.5`.
+
+This places Compliance Overview between IT Hygiene (order 400) and PCI DSS (order 401)
+in both the Security Operations sidebar and the Wazuh overview dashboard card grid.
+
+**Step 11 added to `patch_bundles.py`** — upgrades already-installed bundles that have
+the old `order:407` to `order:400.5` using `apply_patch_marker`.
+
+### Issue 3: install.sh scripts incomplete
+
+Rewrote all three module `install.sh` files to be fully end-to-end:
+- **complianceView/install.sh**: added Step 5 (calls `patch_bundles.py`), Step 6 (`_compress()` helper regenerates `.gz` + `.br` for both Wazuh bundles), ownership fix for compressed files
+- **networkGraph/install.sh**: added Step 5 (calls `patch_plugin.py`), regenerates `wazuh.plugin.js.gz` and `.br`, `.env` write with `WAZUH_API_PASSWORD` placeholder
+- **localization/install.sh**: rewritten to document dual EN/UR buttons, theme button hidden, fyp-theme-changed dispatch
+
+---
+
+## 2026-04-24 — CSS !important fixes (light theme specificity)
+
+### Symptom
+
+After light theme was set as default:
+- Compliance overview **cards** had dark backgrounds, making the alert count numbers invisible
+- Compliance **table headers** appeared with a black background and black text
+
+### Root cause
+
+OSD and Wazuh global stylesheets (and the localization plugin's dark-mode `!important` 
+rules that target `table` and `th` elements globally) were overriding the compliance 
+overview's unguarded `.cv-card { background: #ffffff }` and `.cv-table th { background: #f1f5f9 }`
+selectors. Without `!important`, our light-theme rules lost the CSS specificity war.
+
+### Fix
+
+**`public/index.js` STYLES** — added `!important` to:
+- `.cv-root { background: #f8fafc !important; color: #1a202c !important; }`
+- `.cv-card { background: #ffffff !important; }`
+- `.cv-card-count { color: #1a202c !important; }`
+- `.cv-table th { background: #f1f5f9 !important; color: #4a5568 !important; border-bottom: 2px solid #e2e8f0 !important; }`
+- `.cv-table td { color: #2d3748 !important; }`
+- `.cv-matrix th { background: #f1f5f9 !important; color: #4a5568 !important; }`
+
+**`patch_bundles.py` MOUNT_FN** — same `!important` additions to the embedded panel CSS:
+- `.cv-ov { background: #f8fafc !important; color: #1a202c !important; }`
+- `.cv-ov-card { background: #fff !important; }`
+- `.cv-ov-ccnt { color: #1a202c !important; }`
+- `.cv-ov-tbl th { background: #f1f5f9 !important; color: #4a5568 !important; border-bottom: 2px solid #e2e8f0 !important; }`
+- `.cv-ov-tbl td { color: #2d3748 !important; }`
+
+**Step 12 added to `patch_bundles.py`** — five targeted P12 upgrade patches apply the
+same `!important` additions to already-installed `wazuh.chunk.2.js` bundles.
+
+### Rebuild required
+
+Run `sudo bash install.sh` from `complianceView/` to rebuild the plugin (new STYLES),
+reinstall, run `patch_bundles.py` (step 12 will apply to existing bundle), regenerate
+compressed variants, and restart the dashboard.
+
+---
+
+## 2026-04-24 — Urdu localisation: dynamic string + missing static strings
+
+Added `_t()` / `_tFmt()` helpers to `public/index.js`. Changed one dynamic string:
+
+- `refs.statusEl.textContent` ("Last updated: …") → `_tFmt('cv.lastUpdated', { time })`
+
+Added to `localization/locales/en.json` and `ur.json`:
+
+- `cv.loadingFrameworks` — "Loading frameworks…" loading state
+- `cv.overlapDesc` — full overlap section description paragraph
+- `cv.matrixLegend` — matrix diagonal/off-diagonal legend line
+- `cv.lastUpdated` — "Last updated: {time}" template
+
+**Rebuild required:** `sudo bash install.sh` (localization plugin) + `sudo bash install.sh` (complianceView plugin)

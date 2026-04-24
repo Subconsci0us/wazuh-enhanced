@@ -828,3 +828,18 @@ User request — consolidate the custom FYP plugins out of the generic "Wazuh" O
 ### Status
 
 Bundle rebuilt. ✓
+
+---
+
+## 2026-04-24 — Urdu localisation: missing strings added to locale files
+
+No code changes to this plugin. The following previously missing strings were added to `localization/locales/en.json` and `ur.json` so they are picked up by the DOM text-replacement system:
+
+- Page title with emoji: `🔍 NLQ Search`
+- Button busy states: `Translating…`, `Transpiling…`, `Running query…`
+- DSL input section heading: `Wazuh DSL Query (JSON)`
+- Non-security query rejection message
+
+The MutationObserver in the localization plugin will catch `textContent` assignments for these strings (button busy/ready cycles, status line updates) and replace them with Urdu within 150 ms.
+
+**Rebuild required:** `sudo bash install.sh` (for the localization plugin bundle, which contains the updated locale JSON)

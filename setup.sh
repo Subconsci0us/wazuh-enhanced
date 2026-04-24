@@ -1053,6 +1053,29 @@ echo ""
 info "Features that will be installed: ${FEATURES_TO_RUN[*]}"
 echo ""
 
+# ── Localization dependency check ──────────────────────────────────────────────
+# UI plugins (networkGraph, nlqSearch, complianceView) rely on the localization
+# plugin for Urdu translation.  Warn if any of them is selected but localization
+# is not — Urdu mode will silently show English until the localization plugin is
+# also installed.
+_UI_PLUGINS=(networkGraph nlqSearch complianceView)
+_needs_loc=0
+for _p in "${_UI_PLUGINS[@]}"; do
+    feature_selected "$_p" && _needs_loc=1 && break
+done
+if [ "$_needs_loc" -eq 1 ] && ! feature_selected "localization"; then
+    echo ""
+    echo -e "${YELLOW}┌─────────────────────────────────────────────────────────────┐${NC}"
+    echo -e "${YELLOW}│  WARNING: Urdu localisation plugin is NOT in the install set │${NC}"
+    echo -e "${YELLOW}│  The UI plugins (networkGraph / nlqSearch / complianceView)  │${NC}"
+    echo -e "${YELLOW}│  will function in English-only mode until the localization    │${NC}"
+    echo -e "${YELLOW}│  plugin is installed.  To include it, re-run without --only  │${NC}"
+    echo -e "${YELLOW}│  or add 'localization' to your --only list.                  │${NC}"
+    echo -e "${YELLOW}└─────────────────────────────────────────────────────────────┘${NC}"
+    echo ""
+fi
+unset _UI_PLUGINS _needs_loc _p
+
 # ── Shared setup ───────────────────────────────────────────────────────────────
 shared_setup
 

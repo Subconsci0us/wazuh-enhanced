@@ -61,7 +61,7 @@ var STYLES = `
   /* ── Light theme (default) ─────────────────────────────────────────────── */
   .cv-root {
     width: 100%; height: 100%; display: flex; flex-direction: column;
-    background: #f8fafc; color: #1a202c; font-family: 'Inter', 'Helvetica Neue', sans-serif;
+    background: #f8fafc !important; color: #0f172a !important; font-family: 'Inter', 'Helvetica Neue', sans-serif;
     overflow-y: auto; box-sizing: border-box;
   }
   .cv-header {
@@ -70,28 +70,28 @@ var STYLES = `
     border-bottom: 1px solid #e2e8f0; flex-shrink: 0;
   }
   .cv-title {
-    font-size: 20px; font-weight: 700; color: #2b6cb0; margin-right: auto;
+    font-size: 20px; font-weight: 700; color: #1d4ed8; margin-right: auto;
   }
-  .cv-subtitle { font-size: 12px; color: #718096; }
+  .cv-subtitle { font-size: 12px; color: #475569; }
   .cv-controls { display: flex; align-items: center; gap: 8px; }
   .cv-select {
     background: #ffffff; color: #1a202c; border: 1px solid #e2e8f0;
     border-radius: 4px; padding: 5px 10px; font-size: 13px; cursor: pointer;
   }
   .cv-btn {
-    background: #3182ce; color: #fff; border: none; border-radius: 4px;
+    background: #2563eb; color: #fff; border: none; border-radius: 4px;
     padding: 6px 14px; font-size: 13px; cursor: pointer; white-space: nowrap;
   }
-  .cv-btn:hover { background: #2b6cb0; }
+  .cv-btn:hover { background: #1d4ed8; }
   .cv-section { padding: 16px 20px; }
   .cv-section-title {
-    font-size: 14px; font-weight: 600; color: #2b6cb0;
+    font-size: 14px; font-weight: 600; color: #1d4ed8;
     text-transform: uppercase; letter-spacing: 0.08em;
-    margin: 0 0 12px 0; border-bottom: 1px solid #e2e8f0; padding-bottom: 6px;
+    margin: 0 0 12px 0; border-bottom: 2px solid #dbeafe; padding-bottom: 6px;
   }
   .cv-cards { display: flex; flex-wrap: wrap; gap: 12px; }
   .cv-card {
-    background: #ffffff; border: 1px solid #e2e8f0; border-radius: 8px;
+    background: #ffffff !important; border: 1px solid #e2e8f0; border-radius: 8px;
     padding: 14px 18px; min-width: 140px; cursor: pointer;
     transition: border-color 0.2s, transform 0.1s;
     box-shadow: 0 1px 3px rgba(0,0,0,0.06);
@@ -99,7 +99,7 @@ var STYLES = `
   }
   .cv-card:hover { border-color: #3b82f6; transform: translateY(-1px); }
   .cv-card-label { font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; }
-  .cv-card-count { font-size: 28px; font-weight: 700; line-height: 1; color: #1a202c; }
+  .cv-card-count { font-size: 28px; font-weight: 700; line-height: 1; color: #0f172a !important; }
   .cv-card-status {
     font-size: 11px; font-weight: 600; border-radius: 3px;
     padding: 2px 6px; display: inline-block; width: fit-content;
@@ -120,14 +120,14 @@ var STYLES = `
   .cv-table-wrap { overflow-x: auto; }
   .cv-table { width: 100%; border-collapse: collapse; font-size: 13px; min-width: 800px; }
   .cv-table th {
-    background: #f1f5f9; color: #4a5568; font-weight: 600;
-    text-align: left; padding: 8px 10px; border-bottom: 2px solid #e2e8f0;
+    background: #f1f5f9 !important; color: #334155 !important; font-weight: 600;
+    text-align: left; padding: 8px 10px; border-bottom: 2px solid #cbd5e1 !important;
     cursor: pointer; white-space: nowrap; user-select: none;
   }
-  .cv-table th:hover { color: #2b6cb0; }
+  .cv-table th:hover { color: #1d4ed8; }
   .cv-table th .sort-icon { opacity: 0.4; margin-left: 4px; }
   .cv-table th.sorted .sort-icon { opacity: 1; }
-  .cv-table td { padding: 7px 10px; border-bottom: 1px solid #f0f4f8; color: #2d3748; }
+  .cv-table td { padding: 7px 10px; border-bottom: 1px solid #e2e8f0; color: #0f172a !important; }
   .cv-table tr:hover td { background: rgba(59,130,246,0.04); }
   .cv-table tr.cv-zero td { color: #a0aec0; }
   .cv-table tr.cv-low td { }
@@ -145,15 +145,15 @@ var STYLES = `
   .cv-matrix-wrap { overflow-x: auto; }
   .cv-matrix { border-collapse: collapse; font-size: 12px; }
   .cv-matrix th {
-    background: #f1f5f9; color: #4a5568; font-weight: 600;
-    padding: 6px 10px; text-align: center; border: 1px solid #e2e8f0;
+    background: #dbeafe !important; color: #1e40af !important; font-weight: 700;
+    padding: 6px 10px; text-align: center; border: 1px solid #bfdbfe !important;
   }
-  .cv-matrix td { padding: 6px 10px; text-align: center; border: 1px solid #e2e8f0; font-weight: 600; font-size: 13px; }
+  .cv-matrix td { padding: 6px 10px; text-align: center; border: 1px solid #e2e8f0 !important; font-weight: 600; font-size: 13px; color: #0f172a; background: #ffffff !important; }
   .cv-matrix .row-label {
-    text-align: left; white-space: nowrap; background: #f1f5f9;
-    color: #4a5568; font-size: 12px; font-weight: 600; padding: 6px 12px;
+    text-align: left; white-space: nowrap; background: #dbeafe !important;
+    color: #1e40af !important; font-size: 12px; font-weight: 700; padding: 6px 12px;
   }
-  .cv-matrix .diag { background: #f8fafc; color: #a0aec0; font-weight: 400; }
+  .cv-matrix .diag { background: #f1f5f9 !important; color: #94a3b8 !important; font-weight: 400; }
   .cv-loading { color: #718096; font-size: 13px; padding: 10px 0; }
   .cv-error { color: #c53030; font-size: 13px; padding: 10px 0; }
   .cv-empty { color: #a0aec0; font-size: 13px; padding: 20px 0; text-align: center; }
@@ -273,6 +273,23 @@ var state = {
 
 // Initialise all frameworks as visible.
 FRAMEWORKS.forEach(function(fw) { state.visibleFws[fw.key] = true; });
+
+/* ── Localisation helpers ────────────────────────────────────────────────────
+   _t(key)           — return translated string for current language.
+   _tFmt(key, vars)  — same, then substitute {varName} placeholders. */
+var _CV_EN = {
+  'cv.lastUpdated': 'Last updated: {time}',
+};
+function _t(key) {
+  return (window.__fypLocale__ && window.__fypLocale__.t(key)) || _CV_EN[key] || key;
+}
+function _tFmt(key, vars) {
+  var s = _t(key);
+  Object.keys(vars || {}).forEach(function(k) {
+    s = s.replace('{' + k + '}', String(vars[k]));
+  });
+  return s;
+}
 
 /* ── Render functions ────────────────────────────────────────────────────────── */
 
@@ -587,7 +604,7 @@ function loadAll(refs) {
   Promise.all([summaryPromise].concat(detailPromises)).then(function() {
     renderTable(refs.tableContainer);
     if (refs.refreshBtn) refs.refreshBtn.disabled = false;
-    if (refs.statusEl)   refs.statusEl.textContent = 'Last updated: ' + new Date().toLocaleTimeString();
+    if (refs.statusEl)   refs.statusEl.textContent = _tFmt('cv.lastUpdated', { time: new Date().toLocaleTimeString() });
   });
 
   overlapPromise.then(function() {

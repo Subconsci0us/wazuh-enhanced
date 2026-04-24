@@ -18,7 +18,7 @@
 const http  = require('http');
 const https = require('https');
 
-const DEFAULT_MODEL    = 'phi3.5';
+const DEFAULT_MODEL    = 'gemma:4b';
 const DEFAULT_BASE_URL = 'http://localhost:11434';
 
 /**

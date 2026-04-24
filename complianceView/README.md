@@ -2,7 +2,7 @@
 
 A unified compliance dashboard comparing alert violations across **all** compliance frameworks simultaneously: PCI DSS, HIPAA, GDPR, NIST 800-53, TSC, and PECA.
 
-Accessible natively from the Wazuh **Security Operations** sidebar at order 407 (after PECA), via `/overview/?tab=compliance-overview&tabView=dashboard`.
+Accessible natively from the Wazuh **Security Operations** sidebar at **order 400.5** (after IT Hygiene at 400, before PCI DSS at 401), via `/overview/?tab=compliance-overview&tabView=dashboard`. Also accessible as a standalone OSD app at `/app/complianceView`.
 
 ---
 
@@ -10,9 +10,11 @@ Accessible natively from the Wazuh **Security Operations** sidebar at order 407 
 
 This feature uses a two-layer approach:
 
-### Layer 1 — Standalone OSD plugin (API routes only)
+### Layer 1 — Standalone OSD plugin (API server + fallback UI)
 
-A minimal OSD server plugin installed at `/usr/share/wazuh-dashboard/plugins/complianceView/`. It serves three API routes that the injected UI calls to fetch compliance data from OpenSearch. The plugin's own UI entry (`/app/complianceView`) is not the intended access point.
+A minimal OSD server plugin installed at `/usr/share/wazuh-dashboard/plugins/complianceView/`. It serves three API routes that the injected UI calls to fetch compliance data from OpenSearch.
+
+The plugin also registers its own OSD application at `/app/complianceView` (with `navLinkStatus: 2` — hidden from the sidebar). This provides a direct URL fallback that works independently of the Wazuh bundle patches.
 
 ```
 complianceView/
@@ -43,13 +45,21 @@ complianceView/
 5. Adds `pecaColumns` table column definition
 6. Module tabs — adds `peca` and `compliance-overview` module definitions
 
-**Patches applied to `wazuh.plugin.js` (2):**
-7. Adds `compliance_overview_app` object (order: 407, category: `wz-category-security-operations`)
-8. Inserts `compliance_overview_app` into the apps list after `peca_app`
+**Patches applied to `wazuh.plugin.js` (steps 7–11):**
+7a. Pre-clean: removes legacy `peca_app` block (if present from old installs) to prevent duplicate-id error
+7b. Adds `peca` app constant (order: 406, category: `wz-category-security-operations`)
+7c. Adds `compliance_overview_app` constant (**order: 400.5** — between IT Hygiene and PCI DSS)
+8–9. Inserts both into the apps list (sorted by order value)
+10. Upgrades existing installed bundles: swaps dark-default CSS to light-default, adds `fyp-theme-changed` listener
+11. Upgrades existing installed bundles: corrects order from 407 → 400.5
+12. Upgrades existing installed bundles: adds `!important` to key light-theme CSS declarations
 
 ### Technology choices
 
 - **Vanilla JS + DOM manipulation** — `mountComplianceOverview` uses no React, no D3, no external runtime deps; wrapped in a thin React class for OSD compatibility
+- **Light theme default** — both the standalone app (`.cv-root`) and embedded panel (`.cv-ov`) default to light colors matching Wazuh Dashboard's native light mode
+- **Dark theme via `.dark-theme` class** — scoped under `.cv-root.dark-theme` and `.cv-ov.dark-theme`; toggled by reading `fyp_theme_v2` from localStorage and listening for the `fyp-theme-changed` CustomEvent from the localization plugin
+- **`!important` on key light-theme declarations** — prevents OSD/Wazuh global CSS and the localization plugin's dark-mode rules from overriding card backgrounds and table header colours
 - **Webpack 5** — compiles the standalone plugin UI into one self-contained 15 KB bundle
 - **Build in /tmp** — avoids VirtualBox shared-folder symlink restrictions
 - **OpenSearch aggregation queries** — counts computed server-side; no full document fetch
@@ -178,15 +188,29 @@ Returns the cross-framework alert co-occurrence matrix.
 sudo bash install.sh
 ```
 
+`install.sh` is fully end-to-end: it builds the webpack bundle, installs the OSD plugin, runs `patch_bundles.py` to patch the Wazuh bundles, regenerates the `.gz` and `.br` compressed variants, and restarts the dashboard.
+
+Use `--no-restart` to skip the service restart:
+```bash
+sudo bash install.sh --no-restart
+```
+
 ### Via main repo installer
 
 ```bash
 sudo bash /media/sf_sharedfolderclone/wazuh-fyp-repo/setup.sh --only complianceView
 ```
 
-After installation, navigate to `https://<dashboard-host>/app/complianceView`.
+### Accessing the plugin
 
-The plugin appears in the OSD sidebar under **Security Operations** as **Compliance View**.
+After installation:
+
+| Access point | URL |
+|---|---|
+| Wazuh sidebar | Security Operations → Compliance Overview (order 400.5) |
+| Wazuh overview card | Same order — appears after IT Hygiene, before PCI DSS |
+| Direct URL | `https://<host>/app/complianceView` |
+| Overview tab | `/overview/?tab=compliance-overview&tabView=dashboard` |
 
 ---
 
@@ -199,12 +223,16 @@ var THRESHOLD_GREEN  = 10;   // < 10 alerts → green (NORMAL)
 var THRESHOLD_YELLOW = 50;   // 10–50 → yellow (ELEVATED), >50 → red (HIGH)
 ```
 
-OpenSearch credentials are in `server/routes/index.js`:
+OpenSearch credentials are stored in `server/.env` (written by `install.sh` on first run):
 
-```js
-const OS_USER     = 'admin';
-const OS_PASSWORD = 'lO.5jGDicEdmbH9kt9So1DYeFqkl6k6s';
 ```
+OS_HOST=localhost
+OS_PORT=9200
+OS_USER=admin
+OS_PASSWORD=
+```
+
+Set `OS_PASSWORD` to the `admin` indexer password from `wazuh-passwords.txt`. The `.env` file is not overwritten on reinstall, so credentials survive upgrades.
 
 ---
 

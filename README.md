@@ -157,8 +157,11 @@ sudo bash setup.sh --help                          # print usage info and exit
 | `networkGraph` | Build and install the Network Graph OSD plugin |
 | `nlqSearch` | Build and install the NLQ Search OSD plugin |
 | `complianceView` | Comparative Compliance View — unified OSD plugin comparing PCI DSS, HIPAA, GDPR, NIST, TSC, PECA |
+| `localization` | EN/UR language toggle + dark-mode toolbar; **required for Urdu support in UI plugins** |
 
 `--only` and `--skip` are mutually exclusive. Unknown feature names cause an immediate error.
+
+> **Localization dependency** — `networkGraph`, `nlqSearch`, and `complianceView` all depend on the `localization` plugin for Urdu translation. If you install any of those plugins without `localization`, the UI will remain in English. `setup.sh` will print a warning if this situation is detected.
 
 If one feature fails, the script prints the error, marks that feature as **FAILED**, and continues with the remaining features. A summary table at the end shows which features succeeded, failed, or were skipped. The exit code is non-zero if any feature failed.
 

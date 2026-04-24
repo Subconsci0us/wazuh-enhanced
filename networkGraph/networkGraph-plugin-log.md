@@ -784,3 +784,885 @@ Bundle rebuilt. ✓
 ### Build & install
 - Built in /tmp/networkGraph-build (`webpack compiled successfully in 33864ms`)
 - Installed to `/usr/share/wazuh-dashboard/plugins/networkGraph/target/public/networkGraph.plugin.js`
+- Wazuh-dashboard restarted — service active ✓
+
+---
+
+## 2026-04-24 — Hash-router bypass fix (window.location.replace)
+
+### Symptom
+
+Clicking **Network Graph** in the Wazuh sidebar navigated to
+`https://localhost/app/network-graph#/app/networkGraph` instead of
+`https://localhost/app/networkGraph`. The sidebar entry appeared to do nothing — the
+URL fragment changed but the page stayed on whatever Wazuh module was currently open.
+
+### Root cause
+
+Wazuh's sidebar navigation calls `history.push(redirectTo())` internally.
+`history.push` uses the browser's History API to append a new entry, but Wazuh's OSD
+integration runs on a hash-based router (`#/...`). When `redirectTo` returned
+`'/app/networkGraph'`, the hash router treated it as a hash path and produced
+`/app/network-graph#/app/networkGraph` — appending the destination as a fragment to the
+currently active Wazuh app URL instead of navigating to a new OSD app.
+
+### Fix
+
+Changed `redirectTo` in both fresh-install code and the upgrade patch to use
+`window.location.replace()` instead of returning a bare string:
+
+```js
+// Before (broken — hash router intercepts):
+redirectTo: () => '/app/networkGraph'
+
+// After (correct — full browser navigation bypasses hash router):
+redirectTo: () => { window.location.replace('/app/networkGraph'); }
+```
+
+`window.location.replace()` forces a full browser navigation that completely bypasses
+the Wazuh hash router. The history entry is replaced (not pushed) so the back button
+does not loop.
+
+### Files changed
+
+| File | Change |
+|------|--------|
+| `patch_plugin.py` `NET_GRAPH_APP` constant | `redirectTo` updated to `window.location.replace` for fresh installs |
+| `patch_plugin.py` Step 1b | New idempotent upgrade step that fixes already-installed bundles with the old bare-string `redirectTo` |
+
+### Status
+
+Fix applied to `patch_plugin.py`. Re-running install.sh applies both the fresh-install
+constant and the step-1b upgrade patch in one pass. ✓
+
+---
+
+## 2026-04-24 — PLAN: Right-Side Incident Sidebar
+
+**Status:** PLANNED — not yet implemented  
+**Scope:** Add a docked incident sidebar to the Network Graph page, inspired by OpenSearch Security Analytics' Correlations view.
+
+---
+
+### Goal
+
+Every refresh cycle the sidebar populates with the alerts that drove the current edge colours (the same 5-minute window the graph already fetches). The sidebar is NOT a separate fetch — it reuses the alert data that `fetchData()` already has.
+
+---
+
+### Reconnaissance Summary
+
+**Current data flow (relevant facts for sidebar):**
+
+1. `fetchData()` in `mountApp()` calls two routes in parallel:
+   - `GET /api/network_graph/agents` → Wazuh `/agents?limit=500&select=id,name,ip,status,os.name,os.version`
+   - `GET /api/network_graph/alerts` → Wazuh `/alerts?limit=500&select=agent.id,rule.level,data.srcip,data.dstip,data.src_ip,data.dst_ip&q=timestamp>5min_ago&sort=-timestamp`
+
+2. `alerts` from the alerts route are currently used only to build `alertMap` (agentId → [levels]) and `peerPairs`. The raw alert objects are discarded after `fetchData()` returns. The sidebar needs these raw alert objects.
+
+3. `createGraph(container)` returns `{ update(agents, alertMap), destroy() }`. The update function takes `agents` and `alertMap` — no raw alerts.
+
+4. The alerts route's `select` parameter is insufficient for the sidebar. Missing fields: `rule.id`, `rule.description`, `rule.groups`, `agent.name`, `timestamp`. Also need the document `_id` for the investigate link (Wazuh API returns this as `id` on each alert item in `affected_items`).
+
+5. `ipToAgent` (IP → agentId reverse lookup) is built inside `fetchData()` and is currently local. The sidebar needs it to display "Agent-01 → Agent-03" edge labels.
+
+6. Current layout: full-height flex column inside `params.element` with header + legend + canvas. No horizontal split yet.
+
+7. No theming system exists yet (all colours are hardcoded to light-theme values). The plan introduces `.dark-theme` scoped CSS via a `<style>` injection.
+
+8. The `createGraph()` function has no click handlers on edges and no external API to highlight a specific edge programmatically.
+
+---
+
+### Files to Change
+
+| File | Changes |
+|------|---------|
+| `server/routes/index.js` | Expand alerts `select` to include more fields |
+| `public/index.js` | All layout, sidebar, cross-link, animation changes |
+| (rebuild) `target/public/networkGraph.plugin.js` | Re-run webpack after JS changes |
+
+No new files needed. Everything stays in the two existing files as per the "keep code in networkGraph/public/index.js" and "single-file server routes" constraints.
+
+---
+
+### Phase 1 — Server Route: Expand Alert Fields
+
+**File:** `server/routes/index.js`
+
+**Change:** Update the `select` parameter in the alerts route from:
+```
+&select=agent.id,rule.level,data.srcip,data.dstip,data.src_ip,data.dst_ip
+```
+to:
+```
+&select=agent.id,agent.name,rule.level,rule.id,rule.description,rule.groups,data.srcip,data.dstip,data.src_ip,data.dst_ip,timestamp
+```
+
+**Why:** The sidebar needs `rule.description` for the incident title, `rule.groups` for the group chips, `agent.name` for the source display, and `timestamp` for relative time. `rule.id` is needed to identify the rule. The Wazuh API also returns `id` on each alert item in `affected_items` which maps to the OpenSearch document `_id` — needed for the investigate link URL.
+
+**Test after this change (before touching client side):**
+```bash
+TOKEN=$(curl -sk -u 'wazuh-wui:v86bPF+u+2nph5LxghIFWivBr87qPgJL' \
+  'https://localhost:55000/security/user/authenticate?raw=true')
+curl -sk -H "Authorization: Bearer $TOKEN" \
+  'https://localhost:55000/alerts?limit=3&select=agent.id,agent.name,rule.level,rule.id,rule.description,rule.groups,data.srcip,data.dstip,timestamp&sort=-timestamp' \
+  | python3 -m json.tool | head -80
+```
+Inspect the response to confirm:
+- `id` field present on each alert item (this is the document `_id` for the investigate URL)
+- `rule.description` is a string
+- `rule.groups` is an array of strings
+- `agent.name` is present
+- `timestamp` is ISO 8601
+
+Also test the investigate URL manually: navigate to `/app/wazuh#/overview/?tab=general&tabView=discover&_g=(filters:!())&_a=(filters:!((meta:(alias:!n,disabled:!f,index:'wazuh-alerts-*',key:_id,negate:!f,params:(query:'ALERT_ID'),type:phrase),query:(match_phrase:(_id:'ALERT_ID')))),query:(language:kuery,query:''))` replacing `ALERT_ID` with a real `id` value from the curl output. Confirm the Wazuh Discover view loads filtered to that alert. If the URL pattern doesn't match what the dashboard actually produces, copy the URL from clicking through a live alert and update the `INVESTIGATE_URL_TEMPLATE` constant accordingly.
+
+---
+
+### Phase 2 — Client: Thread Raw Alerts Through the Pipeline
+
+**File:** `public/index.js`
+
+**Current flow:**
+```
+fetchData()
+  → alerts = alertsBody.data.affected_items
+  → build alertMap from alerts  [alerts discarded after this]
+  → graph.update(agents, alertMap)
+```
+
+**New flow:**
+```
+fetchData()
+  → rawAlerts = alertsBody.data.affected_items   [keep reference]
+  → build alertMap from rawAlerts  (unchanged logic)
+  → graph.update(agents, alertMap)               (unchanged)
+  → sidebar.update(rawAlerts, ipToAgent)         [NEW]
+```
+
+**Changes inside `fetchData()`:**
+- Rename `alerts` to `rawAlerts` (clarity).
+- Move `ipToAgent` build to before both the alertMap loop and the sidebar call (it's already built there, just needs to stay in scope long enough to pass to `sidebar.update`).
+- After `graph.update(...)`, call `sidebar.update(rawAlerts, ipToAgent)`.
+- Also pass agents array so the sidebar can resolve agent names from IDs.
+
+The sidebar's `update` call signature:
+```js
+sidebar.update(rawAlerts, agents, ipToAgent)
+```
+
+---
+
+### Phase 3 — Layout: Horizontal Split
+
+**File:** `public/index.js`, inside `mountApp()`
+
+**Current structure:**
+```
+element (flex-column)
+  ├── header
+  ├── legend
+  └── canvas (flex:1)
+```
+
+**New structure:**
+```
+element (flex-column)
+  ├── header (full width)
+  ├── legend (full width)
+  └── mainRow (flex-row, flex:1)
+       ├── graphPane (flex:1, min-width:0, position:relative)
+       │    └── canvas div (100% width/height, D3 SVG goes here)
+       └── sidebarPane (width:320px, flex-shrink:0, overflow:hidden)
+            └── [incident sidebar DOM]
+```
+
+The sidebar pane width is 320px fixed (not a percentage) — this is simpler and more predictable than 30% which can become very narrow on small screens.
+
+**Responsive collapse (< 1200px):**
+- A CSS `@media (max-width: 1199px)` rule hides the sidebarPane (`display:none`) and shows a floating toggle button.
+- A click on the toggle button adds/removes a class `sidebar-open` on the mainRow — the sidebarPane slides in as a fixed overlay from the right.
+
+**Toggle button (always visible):**
+- Small button anchored to the right edge of the graphPane header area.
+- Icon: `▶` (collapsed) / `◀` (expanded).
+- On click: toggles `sidebar-hidden` class on sidebarPane. When hidden, graphPane takes full width.
+
+Implementation approach: inject a `<style>` block into the document `<head>` (scoped to `.ng-layout` class applied to `element`). This avoids inline style management for state transitions.
+
+```css
+.ng-layout { ... }
+.ng-main-row { display:flex; flex:1; overflow:hidden; }
+.ng-graph-pane { flex:1; min-width:0; position:relative; }
+.ng-sidebar-pane { width:320px; flex-shrink:0; border-left:1px solid #e2e8f0; 
+                   overflow:hidden; display:flex; flex-direction:column; 
+                   transition:width 0.2s ease; }
+.ng-sidebar-pane.ng-sidebar-hidden { width:0; }
+.dark-theme .ng-sidebar-pane { border-left-color:#2d3748; background:#1a202c; }
+@media (max-width:1199px) {
+  .ng-sidebar-pane { position:fixed; top:0; right:0; height:100%; z-index:200;
+                     transform:translateX(100%); transition:transform 0.2s ease; }
+  .ng-sidebar-pane.ng-sidebar-open { transform:translateX(0); }
+}
+```
+
+**Dark theme detection:** Check `document.documentElement.classList.contains('dark-theme')` or `document.body.classList.contains('dark-theme')`. Apply `.dark-theme` class to `element` when detected on mount and also listen for class mutations with a `MutationObserver` for live theme switching.
+
+---
+
+### Phase 4 — `createSidebar(container)` Function
+
+**File:** `public/index.js` — new top-level function, similar structure to `createGraph()`.
+
+Returns `{ update(alerts, agents, ipToAgent), scrollToIncident(nodeA, nodeB), highlightEntry(alertId), destroy() }`.
+
+**Internal DOM structure:**
+```
+container (sidebarPane)
+  ├── sidebarHeader
+  │    ├── titleRow: "Recent Incidents" + toggle button
+  │    ├── subtitleRow: "Last refresh: HH:MM:SS" + count badge
+  │    └── filterRow: severity filter <select>
+  └── incidentList (scrollable div, flex:1, overflow-y:auto)
+       ├── [incident entries — D3 data join]
+       └── [empty state div — shown when list is empty]
+```
+
+**Severity chip colour mapping:**
+```js
+var SEVERITY_COLORS = {
+  critical: { bg: '#fed7d7', text: '#c53030', border: '#fc8181' },  // level ≥ 15
+  high:     { bg: '#feebc8', text: '#c05621', border: '#f6ad55' },  // level 12–14
+  medium:   { bg: '#fefcbf', text: '#975a16', border: '#f6e05e' },  // level 7–11
+  low:      { bg: '#bee3f8', text: '#2b6cb0', border: '#90cdf4' },  // level 4–6
+  info:     { bg: '#e2e8f0', text: '#4a5568', border: '#cbd5e0' },  // level < 4
+};
+function severityFromLevel(level) {
+  if (level >= 15) return 'critical';
+  if (level >= 12) return 'high';
+  if (level >= 7)  return 'medium';
+  if (level >= 4)  return 'low';
+  return 'info';
+}
+```
+
+**Each incident entry DOM (single `<div class="ng-incident">`):**
+```
+[severity chip: "12"] [rule description (truncated ~80 chars, title=full text)]
+[src → dst chip row]  [timestamp: "30s ago"]
+[rule group chips]    [🔍 investigate button]
+```
+
+Layout: CSS grid or flex. Compact (≤ 70px tall per entry).
+
+**D3 data join with key = alert `id`:**
+```js
+var sel = d3.select(incidentList)
+  .selectAll('div.ng-incident')
+  .data(filteredAlerts, function(d) { return d.id; });
+
+var entering = sel.enter().append('div').attr('class', 'ng-incident ng-incident-new');
+// ... build DOM for new entries ...
+
+// Mark new entries for 3-second animation, then remove the class.
+entering.each(function() {
+  var el = this;
+  setTimeout(function() {
+    el.classList.remove('ng-incident-new');
+  }, 3000);
+});
+
+sel.exit().remove();
+```
+
+The `ng-incident-new` class applies a CSS left-border pulse animation:
+```css
+.ng-incident-new {
+  animation: ng-new-entry 3s ease forwards;
+}
+@keyframes ng-new-entry {
+  0%   { border-left: 3px solid #3182ce; }
+  80%  { border-left: 3px solid #3182ce; }
+  100% { border-left: 3px solid transparent; }
+}
+```
+
+**Filtering:** The `<select>` filter has options `all | critical | high+ | medium+`. On change, re-run the D3 data join with the filtered subset. Keep the full `rawAlerts` array in closure scope; the select only changes which subset is shown.
+
+**Sorting:** Before the data join, sort `rawAlerts` by timestamp desc (already sorted from server), then stable-sort by severity desc within the same timestamp second (useful when multiple alerts arrive at the same second).
+
+**Top 50 cap:** If `filteredAlerts.length > 50`, display only the first 50 and show a "Show all N incidents" button at the bottom. Clicking it removes the cap and re-runs the join.
+
+**Empty state:** A sibling `<div class="ng-empty-state">` with a green checkmark SVG and the text "No incidents in the last refresh interval. System is quiet." Toggle `display:none` vs `display:flex` based on whether the filtered list is empty.
+
+**Relative timestamp helper:**
+```js
+function relativeTime(isoTimestamp) {
+  var diffMs = Date.now() - new Date(isoTimestamp).getTime();
+  if (diffMs < 0) diffMs = 0;
+  var secs = Math.floor(diffMs / 1000);
+  if (secs < 60)  return secs + 's ago';
+  var mins = Math.floor(secs / 60);
+  if (mins < 60)  return mins + 'm ago';
+  var hours = Math.floor(mins / 60);
+  return hours + 'h ago';
+}
+```
+
+**Source/destination display:**
+```js
+function incidentNodes(alert, agents, ipToAgent) {
+  var srcIp = alert.data && (alert.data.srcip || alert.data.src_ip);
+  var dstIp = alert.data && (alert.data.dstip || alert.data.dst_ip);
+  var srcAgentId = srcIp && ipToAgent[srcIp];
+  var dstAgentId = dstIp && ipToAgent[dstIp];
+
+  // Build a lookup: agentId → name (from the agents array)
+  var agentNameById = {};
+  (agents || []).forEach(function(a) { agentNameById[a.id] = a.name || ('Agent ' + a.id); });
+
+  if (srcAgentId && dstAgentId) {
+    return (agentNameById[srcAgentId] || srcAgentId) + ' → ' + (agentNameById[dstAgentId] || dstAgentId);
+  }
+  if (srcAgentId) {
+    return agentNameById[srcAgentId] || srcAgentId;
+  }
+  // Fall back to the alert's own agent name (the agent that generated the alert)
+  return (alert.agent && alert.agent.name) || (alert.agent && alert.agent.id) || 'Unknown';
+}
+```
+
+**Investigate link URL:**
+```js
+var INVESTIGATE_URL_TEMPLATE =
+  "/app/wazuh#/overview/?tab=general&tabView=discover&_g=(filters:!())" +
+  "&_a=(filters:!((meta:(alias:!n,disabled:!f,index:'wazuh-alerts-*',key:_id," +
+  "negate:!f,params:(query:'ALERT_ID'),type:phrase),query:(match_phrase:(_id:'ALERT_ID'))))," +
+  "query:(language:kuery,query:''))";
+
+function investigateUrl(alertId) {
+  return INVESTIGATE_URL_TEMPLATE.split('ALERT_ID').join(encodeURIComponent(alertId));
+}
+```
+
+Each investigate button: `<a href="..." target="_blank" rel="noopener noreferrer">🔍</a>`.
+
+---
+
+### Phase 5 — Refresh Animation
+
+**File:** `public/index.js`, inside `createSidebar()` and `fetchData()`.
+
+Approach: the `update()` method on the sidebar takes care of the fade internally.
+
+```js
+function update(rawAlerts, agents, ipToAgent) {
+  // Fade existing list to 0.5 opacity
+  d3.select(incidentList).transition().duration(200).style('opacity', 0.5);
+
+  // Snapshot current scroll position
+  var prevScrollTop = incidentList.scrollTop;
+
+  // ... build new data, run D3 join ...
+
+  // Fade back + restore scroll
+  d3.select(incidentList).transition().duration(200).delay(200).style('opacity', 1)
+    .on('end', function() {
+      incidentList.scrollTop = prevScrollTop;
+    });
+
+  // Update subtitle timestamp
+  subtitleEl.textContent = 'Last refresh: ' + new Date().toLocaleTimeString();
+
+  // Pulse header if new critical alert appeared
+  var hadCritical = rawAlerts.some(function(a) { return a.rule && a.rule.level >= 12; });
+  if (hadCritical) {
+    sidebarHeader.style.borderLeft = '3px solid ' + COLOR_HIGH;
+    setTimeout(function() { sidebarHeader.style.borderLeft = ''; }, 2000);
+  }
+}
+```
+
+Note: restore scroll in `.on('end')` after the fade-back transition completes. This prevents the scroll jumping during the fade-out.
+
+---
+
+### Phase 6 — Edge ↔ Sidebar Cross-Linking
+
+**Two-way bridge between graph and sidebar.**
+
+**6a. createGraph() changes:**
+
+Add optional callbacks to the `update()` or new options passed to `createGraph()`:
+
+```js
+function createGraph(container, opts) {
+  // opts = { onEdgeClick, onEdgeHighlightEnd }
+  var onEdgeClick = (opts && opts.onEdgeClick) || function() {};
+  ...
+}
+```
+
+Add click handler to link enter selection:
+```js
+linkEnter.on('click', function(event, d) {
+  var srcId = typeof d.source === 'object' ? d.source.id : d.source;
+  var dstId = typeof d.target === 'object' ? d.target.id : d.target;
+  onEdgeClick(srcId, dstId);
+});
+```
+
+Expose `highlightEdge(srcId, dstId)` and `clearHighlight()` on the returned object:
+
+```js
+function highlightEdge(nodeA, nodeB) {
+  linkLayer.selectAll('line').each(function(d) {
+    var src = typeof d.source === 'object' ? d.source.id : d.source;
+    var tgt = typeof d.target === 'object' ? d.target.id : d.target;
+    var isMatch = (src === nodeA && tgt === nodeB) || (src === nodeB && tgt === nodeA);
+    d3.select(this)
+      .attr('stroke-width', isMatch ? 5 : (d.isPeer ? 1.5 : 2))
+      .style('filter', isMatch ? 'drop-shadow(0 0 4px currentColor)' : null);
+  });
+  // Auto-clear after 2 seconds
+  setTimeout(clearHighlight, 2000);
+}
+
+function clearHighlight() {
+  linkLayer.selectAll('line')
+    .attr('stroke-width', function(d) { return d.isPeer ? 1.5 : 2; })
+    .style('filter', null);
+}
+```
+
+**6b. createSidebar() changes:**
+
+Accept callbacks `{ onIncidentHover, onIncidentHoverOut }` in options:
+```js
+function createSidebar(container, opts) {
+  var onIncidentHover   = (opts && opts.onIncidentHover)   || function() {};
+  var onIncidentHoverOut = (opts && opts.onIncidentHoverOut) || function() {};
+  ...
+}
+```
+
+On each incident entry's enter selection, attach hover handlers:
+```js
+entering
+  .on('mouseover', function(event, d) {
+    var srcIp = d.data && (d.data.srcip || d.data.src_ip);
+    var dstIp = d.data && (d.data.dstip || d.data.dst_ip);
+    var srcAgent = srcIp && currentIpToAgent[srcIp];
+    var dstAgent = dstIp && currentIpToAgent[dstIp];
+    if (srcAgent && dstAgent) onIncidentHover(srcAgent, dstAgent);
+    else if (d.agent && d.agent.id) onIncidentHover(d.agent.id, MANAGER_ID);
+  })
+  .on('mouseout', function() { onIncidentHoverOut(); });
+```
+
+Expose `scrollToIncident(nodeA, nodeB)` and `pulseEntry(alertId)`:
+```js
+function scrollToIncident(nodeA, nodeB) {
+  // Find first entry where both nodes match
+  var found = incidentList.querySelector(
+    '[data-src="' + nodeA + '"][data-dst="' + nodeB + '"],' +
+    '[data-src="' + nodeB + '"][data-dst="' + nodeA + '"]'
+  );
+  if (!found) return;
+  found.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  pulseEntry(found.dataset.alertId);
+}
+
+function pulseEntry(alertId) {
+  var el = incidentList.querySelector('[data-alert-id="' + alertId + '"]');
+  if (!el) return;
+  el.classList.add('ng-incident-pulse');
+  setTimeout(function() { el.classList.remove('ng-incident-pulse'); }, 2000);
+}
+```
+
+CSS for the pulse:
+```css
+.ng-incident-pulse {
+  animation: ng-pulse-border 2s ease;
+}
+@keyframes ng-pulse-border {
+  0%   { box-shadow: 0 0 0 2px #3182ce; }
+  50%  { box-shadow: 0 0 0 3px #3182ce; }
+  100% { box-shadow: none; }
+}
+```
+
+Each incident entry needs `data-alert-id`, `data-src`, `data-dst` HTML attributes set on the enter selection.
+
+**6c. Wiring in mountApp():**
+
+```js
+var graph = createGraph(canvas, {
+  onEdgeClick: function(srcId, dstId) {
+    if (sidebar) sidebar.scrollToIncident(srcId, dstId);
+  }
+});
+
+var sidebar = createSidebar(sidebarPane, {
+  onIncidentHover:    function(srcId, dstId) { if (graph) graph.highlightEdge(srcId, dstId); },
+  onIncidentHoverOut: function()              { if (graph) graph.clearHighlight(); },
+});
+```
+
+---
+
+### Phase 7 — Sidebar Toggle Button
+
+A small button in the top-right of the header:
+```js
+var toggleBtn = document.createElement('button');
+toggleBtn.id = 'ng-sidebar-toggle';
+toggleBtn.textContent = '◀';
+toggleBtn.title = 'Toggle incident sidebar';
+toggleBtn.style.cssText = 'margin-left:8px;padding:4px 8px;background:#e2e8f0;' +
+  'border:none;border-radius:4px;cursor:pointer;font-size:12px;';
+header.appendChild(toggleBtn);
+
+var sidebarHidden = false;
+toggleBtn.addEventListener('click', function() {
+  sidebarHidden = !sidebarHidden;
+  sidebarPane.classList.toggle('ng-sidebar-hidden', sidebarHidden);
+  toggleBtn.textContent = sidebarHidden ? '▶' : '◀';
+});
+```
+
+---
+
+### Phase 8 — Dark Theme Support
+
+Inject a `<style id="ng-styles">` block into `document.head` on mount. The style block includes all sidebar-specific CSS plus `.dark-theme` overrides.
+
+```css
+/* Light theme (default) */
+.ng-sidebar-pane { background:#ffffff; border-left:1px solid #e2e8f0; }
+.ng-sidebar-header { background:#f1f5f9; border-bottom:1px solid #e2e8f0; }
+.ng-incident { border-bottom:1px solid #f0f4f8; }
+
+/* Dark theme */
+.dark-theme .ng-sidebar-pane { background:#1a202c; border-left-color:#2d3748; }
+.dark-theme .ng-sidebar-header { background:#2d3748; border-bottom-color:#4a5568; }
+.dark-theme .ng-incident { border-bottom-color:#2d3748; color:#e2e8f0; }
+.dark-theme .ng-incident-desc { color:#cbd5e0; }
+```
+
+Theme detection at mount time:
+```js
+function isDarkTheme() {
+  return document.documentElement.classList.contains('dark-theme') ||
+         document.body.classList.contains('dark-theme') ||
+         document.querySelector('.euiBody--darkColorScheme') !== null;
+}
+```
+
+Apply to the root element: `element.classList.toggle('dark-theme', isDarkTheme())`.
+
+Use a `MutationObserver` on `document.body` to detect live theme changes and re-apply the class.
+
+---
+
+### Phase 9 — Build & Deploy Sequence
+
+After all code changes:
+
+1. Copy source to `/tmp/networkGraph-build/` (done by `install.sh`).
+2. Run `npm install --legacy-peer-deps` in the build directory.
+3. Run `npx webpack --mode production` → produces new `target/public/networkGraph.plugin.js`.
+4. Run `sudo bash install.sh --no-restart` to copy files.
+5. Restart `wazuh-dashboard` manually: `sudo systemctl restart wazuh-dashboard`.
+6. Verify bundle loaded: `journalctl -u wazuh-dashboard -n 50 --no-pager | grep -i network`.
+
+---
+
+### Phase 10 — Testing Checklist
+
+After install, run through each test:
+
+1. **Sidebar populates with alerts:** Generate test alerts (`wazuh-logtest` or SSH failures). Wait for next refresh (10s). Verify severity chips show rule levels. Verify rule descriptions appear truncated with full text on hover.
+
+2. **Severity chips match rule levels:**
+   - Level ≥ 15 → red chip
+   - Level 12–14 → orange chip
+   - Level 7–11 → yellow chip
+   - Level 4–6 → blue chip
+   - Level < 4 → gray chip
+
+3. **Investigate link:** Click 🔍 button. Confirm new tab opens to Wazuh Discover view filtered to that specific alert `_id`. If URL pattern is wrong, copy the actual URL from manually navigating to a known alert and update `INVESTIGATE_URL_TEMPLATE`.
+
+4. **Refresh animation:** Watch 2–3 refresh cycles. Verify the list fades briefly (200ms), updates, fades back — no jarring rebuild. Verify scroll position preserved when user has scrolled partway down.
+
+5. **Edge click → sidebar scroll:** Click a colored edge in the graph. Verify the sidebar scrolls to the first incident involving those two nodes and a pulse animation plays for 2 seconds.
+
+6. **Incident hover → edge highlight:** Hover over an incident entry that involves a peer-to-peer connection. Verify the corresponding edge in the graph glows/thickens for 2 seconds.
+
+7. **New incident animation:** Trigger an alert while the page is open. On next refresh, the new entry should have a left-border accent animation for 3 seconds.
+
+8. **Empty state:** Wait until the 5-minute alert window has passed with no new alerts. Verify the green checkmark empty state is shown.
+
+9. **Narrow window collapse:** Resize browser window to < 1200px. Verify sidebar collapses. Verify the toggle button appears and clicking it slides the sidebar in from the right.
+
+10. **Toggle button:** On wide screen, click the ◀ / ▶ toggle button. Verify sidebar hides/shows and the graph expands to fill the space.
+
+11. **Dark theme:** Enable Wazuh Dashboard dark theme. Verify sidebar matches dark colour scheme (dark background, light text, dark borders).
+
+12. **Filter dropdown:** Select "Critical only" — verify only rule.level ≥ 15 alerts shown. Select "High+" — verify only ≥ 12 shown. Select "Medium+" — verify only ≥ 7 shown.
+
+13. **>50 incidents cap:** If possible to generate >50 alerts, verify only top 50 shown with "Show all N incidents" button. Clicking it shows all.
+
+14. **curl test for new route fields:**
+```bash
+TOKEN=$(curl -sk -u 'wazuh-wui:v86bPF+u+2nph5LxghIFWivBr87qPgJL' \
+  'https://localhost:55000/security/user/authenticate?raw=true')
+curl -sk -H "Authorization: Bearer $TOKEN" \
+  'https://localhost:55000/alerts?limit=3&select=agent.id,agent.name,rule.level,rule.id,rule.description,rule.groups,data.srcip,data.dstip,timestamp&sort=-timestamp' \
+  | python3 -m json.tool | head -100
+```
+Verify all requested fields appear in response.
+
+15. **Browser console:** No JS errors. Specifically: no "Cannot read property of undefined" on alert fields, no D3 data join key collisions.
+
+---
+
+### Risk Notes & Unknowns
+
+1. **Alert document `_id` field name:** The Wazuh API returns each alert item in `affected_items`. The OpenSearch document ID (`_id`) is typically exposed as `id` on each item. Verify with the curl test in Phase 1 before writing client code that depends on `alert.id`.
+
+2. **`rule.groups` field:** Wazuh rules can have multiple groups. The field should be an array of strings. Some decoders may omit it — always check `Array.isArray(alert.rule.groups)` before rendering chips.
+
+3. **`rule.description` field:** Most rules have this. For custom rules without a description, fall back to `'Rule ' + alert.rule.id`.
+
+4. **Agent-to-agent incident display:** For peer-to-peer alerts, `incidentNodes()` uses `ipToAgent` for src/dst lookup. The `ipToAgent` map is built from the agents list — if src or dst IP doesn't match any enrolled agent (e.g., external IP), the display falls back gracefully to the alert's agent name.
+
+5. **Sidebar pane scroll + D3 join interaction:** D3's `selection.exit().remove()` removes DOM nodes from the bottom of the list. The scroll position snapshot must be taken before the D3 join runs and restored after the fade-back transition completes (not in the middle of the transition).
+
+6. **CSS injection cleanup:** The `<style id="ng-styles">` injected into `document.head` must be removed in the `unmount()` function to avoid style leaking when the user navigates away and returns.
+
+7. **MutationObserver cleanup:** The theme-watching `MutationObserver` must be `.disconnect()`-ed in `unmount()`.
+
+8. **Performance with many alerts:** 500 alerts × DOM nodes is potentially heavy. The 50-item cap mitigates this. If performance is still poor with 50 items, consider using virtual scrolling (out of scope for now).
+
+---
+
+### Implementation Order (when building)
+
+Execute phases in this order to allow incremental testing at each step:
+
+1. Phase 1 (server route) → curl test → confirm fields present
+2. Phase 2 (thread raw alerts through fetchData) → console.log to verify data reaches sidebar.update
+3. Phase 3 (layout split) → visually confirm 70/30 split, no graph regression
+4. Phase 4 (createSidebar basic) → incidents appear in list with chips and text
+5. Phase 5 (refresh animation) → watch several cycles
+6. Phase 6 (cross-linking) → test edge click and hover
+7. Phase 7 (toggle button) → test show/hide
+8. Phase 8 (dark theme) → toggle theme and verify
+9. Phase 9 (build) → install and full regression test
+10. Phase 10 (testing checklist) → log results
+
+---
+
+### Status: PLANNED — ready to implement in next session
+
+---
+
+## Session 2026-04-24 — Right-Side Incident Sidebar (Phases 1–9 implemented)
+
+**Developer:** Claude Sonnet 4.6
+**Scope:** Implement the full right-side incident sidebar plan (phases 1–9) from the plan above.
+
+---
+
+### Files changed
+
+| File | Change |
+|------|--------|
+| `server/routes/index.js` | Expanded alerts `select` to include `agent.name`, `rule.id`, `rule.description`, `rule.groups`, `timestamp` |
+| `public/index.js` | Full rewrite — horizontal split layout, createSidebar, cross-linking, toggle, dark theme support |
+| `target/public/networkGraph.plugin.js` | Rebuilt (316 KiB, webpack 5.106.2, Node 18.19.1) |
+
+---
+
+### Phase 1 — Server route: alert fields expanded
+
+`server/routes/index.js` alerts select parameter changed from:
+```
+&select=agent.id,rule.level,data.srcip,data.dstip,data.src_ip,data.dst_ip
+```
+to:
+```
+&select=agent.id,agent.name,rule.level,rule.id,rule.description,rule.groups,data.srcip,data.dstip,data.src_ip,data.dst_ip,timestamp
+```
+
+**Note:** Wazuh 4.14.3 REST API does not expose an `/alerts` endpoint — alerts are stored directly in the indexer (OpenSearch). The proxy returns `{"title":"Not Found","detail":"404: Not Found"}` with HTTP 200. The client-side `(alertsBody.data && alertsBody.data.affected_items) || []` fallback handles this gracefully and the sidebar shows the green-checkmark empty state. This is pre-existing behaviour from the original build; not caused by the sidebar addition.
+
+---
+
+### Phase 2 — Raw alerts threaded through fetchData
+
+`fetchData()` now retains the full `rawAlerts` array (previously discarded after building `alertMap`) and passes it to `sidebar.update(rawAlerts, agents, ipToAgent)` after `graph.update()`.
+
+---
+
+### Phase 3 — Horizontal split layout
+
+Old layout (canvas directly in element):
+```
+element(flex-col) → header → legend → canvas(flex:1)
+```
+
+New layout:
+```
+element(flex-col, class ng-layout)
+  → header → legend
+  → mainRow(flex-row, flex:1)
+       → graphPane(flex:1) → canvas
+       → sidebarPane(320px, collapsible)
+```
+
+CSS injected into `document.head` as `<style id="ng-styles">` on mount, removed in unmount.
+
+---
+
+### Phase 4 — createSidebar()
+
+New top-level function `createSidebar(container, opts)`. Structure:
+- Header: title + count badge + last-refresh time + filter dropdown
+- Scrollable incident list (D3 data join keyed by alert `id`)
+- Empty state (green checkmark SVG + "System is quiet" message)
+- Show-all button (appears when list is capped at 50 entries)
+
+Each incident entry shows:
+- Severity chip (colour-coded by rule.level: critical/high/medium/low/info)
+- Rule description (truncated to 75 chars, full text in title attribute)
+- Source → destination label (resolved from agent names via ipToAgent)
+- Relative timestamp (e.g. "30s ago")
+- Rule group chips (up to 3, filtered to < 22 chars)
+- 🔍 investigate link (opens Wazuh Discover filtered to alert _id)
+
+New animations:
+- `ng-incident-new` — left-border fade-in over 3 seconds for new entries
+- `ng-incident-pulse` — box-shadow pulse for 2 seconds (triggered by edge click)
+
+---
+
+### Phase 5 — Refresh animation
+
+`sidebar.update()` fades the incident list to 0.5 opacity (200ms), runs the D3 join, then fades back (200ms delay + 200ms fade) and restores scroll position. Header left-border pulses red for 2 seconds if any high-severity alert is present.
+
+---
+
+### Phase 6 — Edge ↔ Sidebar cross-linking
+
+**createGraph changes:**
+- Accepts `opts = { onEdgeClick }` parameter
+- Click handler on link enter selection calls `onEdgeClick(srcId, dstId)`
+- New `highlightEdge(nodeA, nodeB)` — thickens matched edge (stroke-width 5) and adds `drop-shadow(0 0 4px currentColor)` filter; auto-clears after 2 seconds
+- New `clearHighlight()` — resets all edges to default widths
+- `destroy()` return now also includes `highlightEdge` and `clearHighlight`
+
+**createSidebar changes:**
+- Accepts `opts = { onIncidentHover, onIncidentHoverOut }` parameter
+- Incident entry `mouseover` → calls `onIncidentHover(srcId, dstId)` using `data-src`/`data-dst` attributes
+- Incident entry `mouseout` → calls `onIncidentHoverOut()`
+- `scrollToIncident(nodeA, nodeB)` — queries by `[data-src][data-dst]`, scrolls into view, triggers pulse
+- `pulseEntry(alertId)` — adds `ng-incident-pulse` class for 2 seconds
+
+**Wired in mountApp:**
+```js
+graph = createGraph(canvas, {
+  onEdgeClick: function(srcId, dstId) { if (sidebar) sidebar.scrollToIncident(srcId, dstId); },
+});
+sidebar = createSidebar(sidebarPane, {
+  onIncidentHover:    function(srcId, dstId) { if (graph) graph.highlightEdge(srcId, dstId); },
+  onIncidentHoverOut: function()              { if (graph) graph.clearHighlight(); },
+});
+```
+
+---
+
+### Phase 7 — Sidebar toggle button
+
+`#ng-sidebar-toggle` button appended to the header bar (right of Refresh). Toggles `ng-sidebar-hidden` class on `sidebarPane`. Arrow icon: `◀` (open) / `▶` (closed). CSS uses `transition: width 0.2s ease` on `.ng-sidebar-pane`. On narrow screens (< 1200px), switches to a fixed-position slide-over via `@media` query.
+
+---
+
+### Phase 8 — Dark theme support
+
+Theme detection:
+- `isDarkTheme()` checks `document.documentElement`, `document.body`, and `.euiBody--darkColorScheme`
+- `applyTheme(dark)` toggles `.dark-theme` class on `element`
+- Listens to `fyp-theme-changed` CustomEvent (dispatched by the localization plugin)
+- `MutationObserver` on `document.body` as fallback
+
+Dark theme CSS scoped to `.ng-layout.dark-theme`:
+- Sidebar background: `#1e293b`; header: `#2d3748`
+- SVG canvas background: `#1a202c` (via `.dark-theme .ng-graph-svg`)
+- Incident text/borders updated to dark palette
+
+All observers and listeners cleaned up in `unmount()`.
+
+---
+
+### Phase 9 — Build & deploy
+
+```
+Webpack: 5.106.2
+Node.js: 18.19.1
+Bundle size: 316 KiB (up from 291 KiB — sidebar + helper code adds ~25 KiB)
+Build time: 28.6 s
+```
+
+Install result:
+```
+[1/5] Build dir prepared
+[2/5] npm install: 153 packages, 0 vulnerabilities
+[3/5] webpack: compiled successfully
+[4/5] Plugin files copied to /usr/share/wazuh-dashboard/plugins/networkGraph/
+[5/5] patch_plugin.py: all 3 patches [SKIP] (already applied)
+wazuh.plugin.js.gz + .br regenerated
+wazuh-dashboard restarted — active ✓
+57 plugins loaded in OSD startup log (networkGraph confirmed present) ✓
+```
+
+---
+
+### Testing results
+
+| Test | Result |
+|------|--------|
+| `/api/network_graph/agents` via OSD proxy | HTTP 200, returns 1 agent (manager) ✓ |
+| `/api/network_graph/alerts` via OSD proxy | HTTP 200, body = Wazuh 404 (pre-existing — no `/alerts` endpoint in 4.14.3 REST API) |
+| Client-side fallback for missing alerts | `rawAlerts = []`, sidebar shows empty state ✓ |
+| Plugin in OSD startup log (57 plugins) | ✓ confirmed |
+| Dashboard service active | `active` ✓ |
+
+**Pending UI tests** (require browser + real alert data):
+- Sidebar visible to right of graph, toggle button collapses/expands it
+- Severity chips render with correct colours
+- Edge click → sidebar scroll
+- Incident hover → edge highlight
+- Dark theme toggle (via localization plugin)
+- Investigate link URL correctness (must verify INVESTIGATE_URL_TEMPLATE against live alert)
+
+### Status: IMPLEMENTED — built and installed. UI testing pending.
+
+
+
+---
+
+## 2026-04-24 — Urdu localisation: dynamic string support
+
+Added `_t()` / `_tFmt()` localisation helpers to `public/index.js`. Replaced three dynamic string concatenations with `_tFmt()` calls so they render in Urdu when Urdu mode is active:
+
+- `showAllBtn.textContent` → `_tFmt('ng.showAll', { count })`
+- Sidebar `subtitleEl.textContent` → `_tFmt('ng.lastRefresh', { time })`
+- Header `statusEl.textContent` (agent count) → `_tFmt('ng.agentsStatus', { count, time })`
+
+All static UI strings (title, legend labels, filter options, sidebar header, empty-state message) were added to `localization/locales/en.json` and `ur.json` for DOM text-replacement coverage.
+
+**Rebuild required:** `sudo bash install.sh`

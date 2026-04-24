@@ -287,8 +287,8 @@ var BTN_STYLE = [
   'transition: background 0.15s, border-color 0.15s',
 ].join(';');
 
-// Base style for language buttons — accent/muted states applied separately by _syncLangBtns().
-var LANG_BTN_BASE = [
+// Style for the single language toggle button.
+var LANG_BTN_STYLE = [
   'border-radius: 4px',
   'padding: 4px 9px',
   'cursor: pointer',
@@ -298,6 +298,9 @@ var LANG_BTN_BASE = [
   'white-space: nowrap',
   'line-height: 1.4',
   'transition: background 0.15s, border-color 0.15s, color 0.15s',
+  'background: transparent',
+  'color: #94a3b8',
+  'border: 1px solid #475569',
 ].join(';');
 
 // _mountToolbar — safe wrapper called from start() and the MutationObserver.
@@ -356,42 +359,30 @@ function createToolbar() {
     'direction: ltr',
   ].join(';');
 
-  /* Two language buttons — both always visible.
-     Active language = solid blue (#3b82f6).  Inactive = muted/outlined.
-     Styling is theme-independent (same accent colour in any mode). */
-  var enBtn = document.createElement('button');
-  var urBtn = document.createElement('button');
+  /* Single language toggle — shows the language you can switch TO.
+     English mode  → button reads "UR"  (click to go Urdu)
+     Urdu mode     → button reads "EN"  (click to go English) */
+  var langBtn = document.createElement('button');
+  langBtn.id            = 'fyp-lang-btn';
+  langBtn.style.cssText = LANG_BTN_STYLE;
 
-  enBtn.id          = 'fyp-en-btn';
-  urBtn.id          = 'fyp-ur-btn';
-  enBtn.textContent = 'EN';
-  urBtn.textContent = 'UR';
+  _syncLangBtn(langBtn);
 
-  _syncLangBtns(enBtn, urBtn);
-
-  enBtn.addEventListener('mouseenter', function() {
-    this.style.background = _lang === 'en' ? '#2563eb' : 'rgba(71,85,105,0.35)';
+  langBtn.addEventListener('mouseenter', function() {
+    this.style.background   = 'rgba(71,85,105,0.35)';
+    this.style.borderColor  = '#60a5fa';
   });
-  enBtn.addEventListener('mouseleave', function() { _syncLangBtns(); });
-
-  urBtn.addEventListener('mouseenter', function() {
-    this.style.background = _lang === 'ur' ? '#2563eb' : 'rgba(71,85,105,0.35)';
+  langBtn.addEventListener('mouseleave', function() {
+    this.style.background   = 'transparent';
+    this.style.borderColor  = '#475569';
   });
-  urBtn.addEventListener('mouseleave', function() { _syncLangBtns(); });
+  langBtn.addEventListener('click', function() {
+    setLanguage(_lang === 'en' ? 'ur' : 'en');
+  });
 
-  enBtn.addEventListener('click', function() { setLanguage('en'); });
-  urBtn.addEventListener('click', function() { setLanguage('ur'); });
-
-  /* Theme button — code preserved but hidden from UI.
-     The localStorage key fyp_theme_v2 and setDarkMode() continue to function
-     programmatically; the button is just not rendered in the toolbar.
-     TEMPORARY: Theme toggle hidden pending full-app dark mode support.
-     To re-enable, remove the `themeBtn.style.display = 'none'` line below
-     and un-comment the `dlg.appendChild(themeBtn)` call. */
   var themeBtn = document.createElement('button');
   themeBtn.id            = 'fyp-theme-btn';
   themeBtn.style.cssText = BTN_STYLE;
-  themeBtn.style.display = 'none';   // TEMPORARY: hidden until full dark-mode rollout
 
   _syncThemeBtn(themeBtn);
 
@@ -407,9 +398,8 @@ function createToolbar() {
     setDarkMode(!_dark);
   });
 
-  dlg.appendChild(enBtn);
-  dlg.appendChild(urBtn);
-  dlg.appendChild(themeBtn); // themeBtn is display:none — kept for future re-enable
+  dlg.appendChild(langBtn);
+  dlg.appendChild(themeBtn);
 
   document.body.appendChild(dlg);
 
@@ -423,28 +413,19 @@ function createToolbar() {
 }
 
 /**
- * Sync both EN and UR language buttons to reflect the current active language.
- * Active language: solid blue accent.  Inactive: muted transparent outline.
- * Styling is theme-independent — same appearance in light and dark mode.
+ * _syncLangBtn — update the single language toggle to show the opposite language.
+ * English active → button reads "UR" (click to switch to Urdu)
+ * Urdu active    → button reads "EN" (click to switch to English)
  */
-function _syncLangBtns(enBtn, urBtn) {
-  enBtn = enBtn || document.getElementById('fyp-en-btn');
-  urBtn = urBtn || document.getElementById('fyp-ur-btn');
-  if (!enBtn || !urBtn) return;
-
-  var ACTIVE   = LANG_BTN_BASE + ';background:#3b82f6;color:#fff;border:1px solid #3b82f6;';
-  var INACTIVE = LANG_BTN_BASE + ';background:transparent;color:#94a3b8;border:1px solid #475569;';
-
+function _syncLangBtn(btn) {
+  btn = btn || document.getElementById('fyp-lang-btn');
+  if (!btn) return;
   if (_lang === 'en') {
-    enBtn.style.cssText = ACTIVE;
-    urBtn.style.cssText = INACTIVE;
-    enBtn.title = 'English (active)';
-    urBtn.title = 'Switch to Urdu / اردو میں تبدیل کریں';
+    btn.textContent = 'UR';
+    btn.title       = 'Switch to Urdu / اردو میں تبدیل کریں';
   } else {
-    enBtn.style.cssText = INACTIVE;
-    urBtn.style.cssText = ACTIVE;
-    enBtn.title = 'Switch to English';
-    urBtn.title = 'اردو (فعال)';
+    btn.textContent = 'EN';
+    btn.title       = 'Switch to English';
   }
 }
 
@@ -505,7 +486,7 @@ function setLanguage(lang) {
   var map = lang === 'ur' ? EN_TO_UR : UR_TO_EN;
   _applyReplaceMap(map);
 
-  _syncLangBtns();
+  _syncLangBtn();
 
   // Notify custom plugins that may listen
   try {
@@ -697,11 +678,8 @@ function _stopNavListener() {
 
 class LocalizationPlugin {
   setup(/* core */) {
-    return {};
-  }
-
-  start(core /* , plugins */) {
-    // Expose global translation interface for custom plugins
+    // Expose stub immediately so _t()/_tFmt() helpers in other plugins never
+    // see undefined during the OSD bootstrap phase (before start() fires).
     window.__fypLocale__ = {
       lang: _lang,
       t: function(key) {
@@ -709,6 +687,13 @@ class LocalizationPlugin {
         return (locale && locale[key]) || key;
       },
     };
+    return {};
+  }
+
+  start(core /* , plugins */) {
+    // Refresh lang in case loadPreferences() hasn't run yet; the object
+    // was created in setup() so all references to __fypLocale__ are valid.
+    window.__fypLocale__.lang = _lang;
 
     // First attempt — may be removed if OSD's React mount hasn't finished yet.
     _mountToolbar();
