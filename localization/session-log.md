@@ -352,3 +352,581 @@ All four plugins rebuilt and reinstalled:
 - complianceView — OK
 
 All four `wazuh-dashboard` restarts reported `active`. Deployment complete.
+
+---
+
+## 2026-04-25 — Site-wide Urdu localization expansion plan
+
+### Research findings
+
+Before planning, the live system was audited. Key facts that shape every decision below:
+
+**1. Wazuh plugin strings are hardcoded**
+`wazuh.plugin.js` + 20 chunk files contain ~7 000+ string literals. The Wazuh plugin's `translations/en-US.json` is empty — Wazuh does NOT use `@osd/i18n` keys for its own UI strings. They are compiled directly into the minified bundle. This means the OSD native i18n system cannot translate Wazuh-specific text. **DOM text-node replacement is the only viable approach for all Wazuh strings.**
+
+**2. OSD Core uses the native i18n system**
+OSD itself has 2 562 i18n keys (namespaces: `core.*`, `dashboard.*`, `opensearch-dashboards-react.*`, `queryEnhancements.*`, `data.*`, `visualize.*`, etc.). These are rendered via React `<FormattedMessage>` components and resolved at render time by `@osd/i18n.translate()`. Changing locale for these requires server-side registration of a `ur-PK.json` file + an OSD restart (or page reload with `?i18n-locale=ur-PK`). DOM replacement is still needed as a fallback because React renders asynchronously.
+
+**3. OSD locale switching requires a page reload**
+OSD reads its locale from config (`opensearch_dashboards.yml → i18n.locale`) or a URL query param (`?i18n-locale=ur-PK`) at bootstrap time. There is no client-side dynamic locale switch. The approach for Phase 6 is: server registers `ur-PK.json`, and when the user clicks "UR" the page reloads with `?i18n-locale=ur-PK` in the URL. On reload, OSD renders all `<FormattedMessage>` components in Urdu. When the user clicks "EN" the page reloads without the param (or with `?i18n-locale=en-US`).
+
+**4. Current translation coverage**
+68 keys, all in custom plugins (networkGraph, nlqSearch, complianceView). Toolbar only visible on `wz-home`. DOM replacement already runs on every page — the only restriction is the toolbar being hidden outside home.
+
+**5. DOM replacement already works site-wide**
+The MutationObserver is active on all pages. The TreeWalker + debounce approach already re-applies translations when any React component re-renders. The foundation is sound; the gap is purely string catalog coverage.
+
+---
+
+### Architecture for full-site localization
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                    LOCALIZATION PLUGIN — two-track approach                 │
+├─────────────────────────────────────────┬───────────────────────────────────┤
+│  TRACK A — DOM replacement              │  TRACK B — OSD native i18n        │
+│  (Wazuh plugin strings + fallback)      │  (OSD Core / EUI chrome strings)  │
+│                                         │                                   │
+│  • TreeWalker on document.body          │  • server/plugin.js registers      │
+│  • MutationObserver (already running)   │    ur-PK.json via                 │
+│  • Covers: Wazuh Overview, Agents,      │    i18n.registerTranslationFile() │
+│    all security modules, Management,    │  • ur-PK.json covers ~200 priority │
+│    OSD navbar text nodes                │    core.*, dashboard.*,            │
+│  • ~350+ new keys in en.json/ur.json    │    queryEnhancements.* keys        │
+│  • Instant (no reload)                  │  • On "UR" click: reload with      │
+│                                         │    ?i18n-locale=ur-PK              │
+│                                         │  • On "EN" click: reload without   │
+└─────────────────────────────────────────┴───────────────────────────────────┘
+```
+
+Track A gives instant Urdu for all Wazuh content. Track B gives correct Urdu for OSD chrome (Discover, Dashboard management, Settings). Both tracks fire together; Track B's page-reload approach means OSD chrome strings are correct on second paint, while Track A keeps custom plugin strings correct even without a reload.
+
+---
+
+### Phase 0 — Unblock toolbar on all pages
+
+**File**: `localization/public/index.js`
+
+**Change**: Replace the `_isWazuhHome()` check in `_startNavListener()` with always-visible logic. The toolbar currently only appears on `/app/wz-home`. For site-wide localization this must be removed — users need the EN/UR toggle on every page.
+
+```js
+// Before: _appIdSub = core.application.currentAppId$.subscribe(function(appId) {
+//   _setToolbarVisible(appId === 'wz-home' || !appId);
+// });
+
+// After:
+_appIdSub = core.application.currentAppId$.subscribe(function() {
+  _setToolbarVisible(true);
+});
+// Also update _isWazuhHome() fallback to always return true
+```
+
+Also update `_checkVisibility()` to always call `_setToolbarVisible(true)`.
+
+**Impact**: Toolbar appears on every Wazuh page (Overview, Agents, Threat Hunting, Discover, Settings, etc.).
+
+---
+
+### Phase 1 — Wazuh Overview / Home page strings (~60 new keys)
+
+**Visible sections** (inspected from live instance):
+
+| Section | Strings to add |
+|---------|---------------|
+| Section category badges | "Threat intelligence", "Security operations", "Endpoint security", "Auditing and policy monitoring", "IT Hygiene", "Cloud security", "Regulatory Compliance" |
+| Module cards | "Security Events", "Integrity Monitoring", "Policy Monitoring", "Vulnerability Detection", "Malware Detection", "Threat Hunting", "Configuration Assessment", "MITRE ATT&CK" |
+| Module card descriptions | 8 description strings (one per module card) |
+| AWS / Azure / Google Cloud / Office 365 / GitHub / Docker | Display names |
+| Status pills | "Active", "Disconnected", "Never connected", "Pending" |
+| Header row | "Overview", "Agents", "Management", "Dev Tools", "Explore", "Discover" |
+| Agent summary widget | "Agents by Status", "Total agents", "Active", "Disconnected", "Never connected" |
+
+**Key naming convention** (new namespace `wz.*`):
+```
+wz.section.threatIntel     = "Threat intelligence"
+wz.section.secOps          = "Security operations"
+wz.module.securityEvents   = "Security Events"
+wz.module.fim              = "File Integrity Monitoring"
+wz.module.vuln             = "Vulnerability Detection"
+...
+wz.status.active           = "Active"
+wz.status.disconnected     = "Disconnected"
+wz.status.neverConnected   = "Never connected"
+wz.status.pending          = "Pending"
+```
+
+**Urdu translations** (sample):
+- "Threat intelligence" → "خطرات کی معلومات"
+- "Security Events" → "سیکیورٹی واقعات"
+- "File Integrity Monitoring" → "فائل سالمیت نگرانی"
+- "Vulnerability Detection" → "کمزوریوں کا پتہ لگانا"
+- "Active" → "فعال"
+- "Disconnected" → "منقطع"
+
+---
+
+### Phase 2 — Navigation sidebar strings (~40 new keys)
+
+The left collapsible nav renders text nodes that the TreeWalker already sees. All nav item labels need to be added to the catalog.
+
+**Sidebar sections**:
+
+| Nav group | Items |
+|-----------|-------|
+| Top-level | "Home", "Overview", "Agents" |
+| Threat Detection | "Security Events", "Threat Hunting", "File Integrity Monitoring", "Malware Detection", "Vulnerability Detection", "MITRE ATT\&CK", "Configuration Assessment" |
+| Auditing | "Policy Monitoring", "System Auditing" |
+| Regulatory | "PCI DSS", "GDPR", "HIPAA", "NIST 800-53", "TSC" |
+| Cloud | "AWS", "Azure", "Google Cloud", "Office 365", "GitHub", "Docker" |
+| Management | "Rules", "Decoders", "CDB Lists", "Groups", "Cluster", "Status", "Logs", "Settings", "Ruleset Test" |
+| OSD | "Discover", "Dashboard", "Visualize", "Dev Tools", "Reports", "Advanced Settings", "Index Patterns", "Dashboard management" |
+
+**Key naming**: `nav.*` namespace.
+
+**RTL consideration for sidebar**: The sidebar is currently excluded from RTL (`direction: ltr !important`) to keep icons in the correct position. Nav item text itself should still read RTL when Urdu is active. Phase 10 addresses this with targeted CSS: keep icon+text-container LTR, but let the text node inside use `unicode-bidi: embed`.
+
+---
+
+### Phase 3 — Agents page strings (~50 new keys)
+
+**Agents list table columns**:
+`wz.agents.col.name`, `.id`, `.status`, `.ip`, `.group`, `.os`, `.version`, `.actions`, `.lastKeepAlive`, `.registerDate`
+
+English → Urdu:
+- "Name" → "نام"
+- "ID" → "شناخت"
+- "Status" → "حالت"
+- "IP address" → "آئی پی پتہ"
+- "Group" → "گروپ"
+- "Operating system" → "آپریٹنگ سسٹم"
+- "Version" → "ورژن"
+- "Actions" → "اقدامات"
+
+**Agents page headings / filters**:
+- "Agents management" → "ایجنٹس کا انتظام"
+- "Add agent" → "ایجنٹ شامل کریں"
+- "Agent filter" → "ایجنٹ فلٹر"
+- "All agents" → "تمام ایجنٹس"
+- "No agents found" → "کوئی ایجنٹ نہیں ملا"
+- "Agents summary" → "ایجنٹس خلاصہ"
+- "Agent enrollment" → "ایجنٹ اندراج"
+
+**Agent detail panel** (flyout that opens on row click):
+- "Agent information", "Configuration", "Groups", "Vulnerabilities", "Events", "Inventory", "Configuration Assessment"
+
+---
+
+### Phase 4 — Security module strings (~80 new keys)
+
+Each security module is a React SPA that re-renders on navigation. The MutationObserver already catches these re-renders. We need to add the static strings from each module.
+
+**4.1 Threat Hunting (Security Events)**
+- Dashboard header: "Threat Hunting", "Add filter", "Search alerts"
+- Table columns: "Timestamp", "Agent", "Rule description", "Level", "Rule ID", "Technique", "Tactic"
+- Empty state: "No alerts found for the selected time range."
+- Severity labels: "Critical", "High", "Medium", "Low", "Informational"
+
+**4.2 File Integrity Monitoring**
+- "File Integrity Monitoring dashboard"
+- Event types: "Added", "Modified", "Deleted", "Permissions changed", "Ownership changed"
+- Columns: "File", "Action", "Date", "Agent", "Rule"
+
+**4.3 Vulnerability Detection**
+- "Vulnerability Detection"
+- Severity pills: "Critical", "High", "Medium", "Low"
+- Columns: "CVE", "Package", "Version", "Fix version", "Published", "Affected agents"
+
+**4.4 MITRE ATT&CK**
+- "MITRE ATT&CK" (keep acronym, add Urdu subtitle)
+- "Tactics", "Techniques", "Sub-techniques"
+- "Explore security alerts mapped to adversary tactics and techniques for better threat understanding." → long description
+
+**4.5 Configuration Assessment**
+- "Policy Monitoring"
+- "Pass" → "کامیاب", "Fail" → "ناکام", "Not applicable" → "قابل اطلاق نہیں"
+- Columns: "ID", "Description", "Rationale", "Result", "Remediation"
+
+**4.6 Malware Detection**
+- "Malware Detection"
+- Event columns matching Threat Hunting pattern
+
+**4.7 AWS / Azure / Google Cloud modules**
+- Module name labels + dashboard section headings (short, non-technical: service names stay in English)
+- "AWS dashboard", "Azure Logs", "Google Cloud Pub/Sub"
+
+**Key insight for modules**: React re-renders the entire module content on tab switch. The MutationObserver + 150 ms debounce catches this. No additional observer logic is needed — only the string catalog matters.
+
+---
+
+### Phase 5 — Management section strings (~70 new keys)
+
+**5.1 Rules**
+- Page title: "Rules" → "قوانین"
+- Columns: "ID" → "شناخت", "Level" → "سطح", "Description" → "تفصیل", "Groups" → "گروپس", "File" → "فائل", "Status" → "حالت"
+- Filters: "Search rules", "Filter by group", "Filter by level", "Filter by file", "Filter by status"
+- Status: "Enabled" → "فعال", "Disabled" → "غیر فعال"
+
+**5.2 Decoders**
+- Columns: "Name" → "نام", "Type" → "قسم", "File" → "فائل", "Parents" → "والدین"
+
+**5.3 CDB Lists**
+- "CDB Lists" → "CDB فہرستیں"
+- "Add list", "Delete list", "Import list"
+
+**5.4 Groups**
+- "Groups" → "گروپس"
+- Columns: "Name", "Agents count", "Configuration status", "Actions"
+- "Add group" → "گروپ شامل کریں"
+
+**5.5 Cluster / Status**
+- "Cluster" → "کلسٹر"
+- "Master node" → "ماسٹر نوڈ", "Worker node" → "ورکر نوڈ"
+- "Running" → "چل رہا ہے", "Stopped" → "بند"
+- "Cluster status", "Daemons status"
+
+**5.6 Logs**
+- "Logs" → "لاگز"
+- Log level labels: "Information" → "معلومات", "Warning" → "تنبیہ", "Error" → "خرابی", "Debug" → "ڈیبگ"
+
+**5.7 Settings**
+- Top-level: "Settings" → "ترتیبات", "API Connections" → "API روابط"
+- "Add API connection" → "API رابطہ شامل کریں"
+- "About" → "بارے میں"
+
+---
+
+### Phase 6 — Server-side OSD native i18n registration
+
+**Goal**: Translate OSD Core strings (Discover UI, Dashboard panels, Settings screens) that use `<FormattedMessage>` and cannot be reached by DOM replacement until after a React re-render.
+
+**File**: `localization/server/plugin.js`
+
+**Change**: In the `setup(core)` method, call `core.i18n.registerTranslationFile(absolutePath)` to register `localization/locales/ur-PK.json` (a new file, separate from `ur.json`). This makes OSD serve the translations at `/translations/ur-PK.json` on the next OSD start.
+
+```js
+// server/plugin.js — setup method
+const path = require('path');
+setup(core) {
+  core.i18n.registerTranslationFile(
+    path.resolve(__dirname, '../locales/ur-PK.json')
+  );
+  return {};
+}
+```
+
+**`locales/ur-PK.json`** — new file, format mirrors the OSD translation files:
+```json
+{
+  "locale": "ur-PK",
+  "messages": {
+    "core.application.appNotFound.title": "ایپلیکیشن نہیں ملی",
+    "dashboard.actions.toggleExpandPanelMenuItem.expandedDisplayName": "چھوٹا کریں",
+    "dashboard.actions.toggleExpandPanelMenuItem.notExpandedDisplayName": "پینل بڑا کریں",
+    ...
+  }
+}
+```
+
+**Priority keys to include** (~200 of the most visible OSD chrome strings):
+- `core.*` — "Application not found", browser deprecation warnings, table select/sort controls
+- `dashboard.*` — Panel actions, "Add panel", "Add visualization", empty state, clone, rename
+- `opensearch-dashboards-react.*` — Range controls, edit dropdown labels
+- `queryEnhancements.*` — Query language switcher, banner, callout messages
+- `data.*` (subset) — Date picker labels, search bar labels
+- `visualize.*` (subset) — "New visualization", "Edit", "Save"
+
+This requires ~4–6 hours of translation work to produce the `ur-PK.json` keys file.
+
+---
+
+### Phase 7 — Client-side locale switch on language toggle
+
+**Goal**: When the user clicks "UR", trigger an OSD page reload with `?i18n-locale=ur-PK` so `<FormattedMessage>` components render in Urdu. When the user clicks "EN", reload without that param (or with `?i18n-locale=en-US`).
+
+**File**: `localization/public/index.js` — `setLanguage()` function
+
+**Change**:
+```js
+function setLanguage(lang) {
+  if (lang !== 'en' && lang !== 'ur') return;
+  try { localStorage.setItem('fyp_language', lang); } catch (_) {}
+
+  if (lang === 'ur') {
+    // Track A: instant DOM replacement
+    _applyDomTranslations();
+    // Track B: reload with OSD locale param so FormattedMessage components render in Urdu
+    var url = new URL(window.location.href);
+    url.searchParams.set('i18n-locale', 'ur-PK');
+    window.location.replace(url.toString());
+    return; // reload handles the rest
+  } else {
+    // Revert Track A immediately
+    _applyReplaceMap(UR_TO_EN);
+    // Track B: reload without locale param
+    var url = new URL(window.location.href);
+    url.searchParams.delete('i18n-locale');
+    window.location.replace(url.toString());
+    return;
+  }
+}
+```
+
+**`loadPreferences()` change**: On page load, if `localStorage.fyp_language === 'ur'` AND `i18n-locale=ur-PK` is already in the URL, apply only Track A (DOM replacement) — no reload needed. If `localStorage.fyp_language === 'ur'` but the URL param is absent, trigger the reload.
+
+**Fallback**: If Phase 6 server registration is not yet complete (localization plugin server doesn't export `i18n.registerTranslationFile`), the reload will still apply Track A DOM replacements on load without any OSD chrome Urdu — a graceful degradation.
+
+---
+
+### Phase 8 — Attribute translation expansion
+
+The current `_applyReplaceMap()` already handles `placeholder` attributes. Expand to:
+
+**New attribute targets** in `_applyReplaceMap()`:
+
+```js
+// title attributes (button tooltips, column header titles)
+document.querySelectorAll('[title]').forEach(function(el) {
+  if (_isInsideToolbar(el)) return;
+  var t = (el.getAttribute('title') || '').trim();
+  if (t && replaceMap[t]) el.setAttribute('title', replaceMap[t]);
+});
+
+// aria-label attributes (screen reader + visible labels for icon buttons)
+document.querySelectorAll('[aria-label]').forEach(function(el) {
+  if (_isInsideToolbar(el)) return;
+  var a = (el.getAttribute('aria-label') || '').trim();
+  if (a && replaceMap[a]) el.setAttribute('aria-label', replaceMap[a]);
+});
+
+// alt attributes (images with descriptive alt text)
+document.querySelectorAll('img[alt]').forEach(function(el) {
+  var alt = (el.getAttribute('alt') || '').trim();
+  if (alt && replaceMap[alt]) el.setAttribute('alt', replaceMap[alt]);
+});
+```
+
+**Keys to add for attributes** (~30 new keys):
+- Button `title` values: "Sort ascending", "Sort descending", "Filter", "Remove filter", "Close", "Expand row", "Collapse row", "Delete", "Edit", "Refresh"
+- `aria-label` values for icon buttons: "Add filter", "Delete filter", "Toggle row details", "Open menu", "Close flyout"
+
+---
+
+### Phase 9 — Dynamic string pattern matching (regex fallback)
+
+Some Wazuh strings are dynamic but follow predictable patterns:
+- "Showing 1 - 25 of 1,234 agents"
+- "Last updated: 2 minutes ago"
+- "Showing page 3 of 12"
+
+These will never match exact keys. Add a `_applyPatternTranslations(map)` function that runs after `_applyReplaceMap()`:
+
+```js
+var PATTERNS_EN_TO_UR = [
+  {
+    re: /^Showing (\d[\d,]*) - (\d[\d,]*) of (\d[\d,]*)(.*)$/,
+    fn: function(m) {
+      return m[1] + ' سے ' + m[2] + ' تک، کل ' + m[3] + m[4];
+    }
+  },
+  {
+    re: /^(\d+) agent\(s\)(.*)$/,
+    fn: function(m) { return m[1] + ' ایجنٹ' + m[2]; }
+  },
+  // ... additional patterns
+];
+
+function _applyPatternTranslations() {
+  if (_lang !== 'ur') return;
+  var walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT, ...);
+  var node;
+  while ((node = walker.nextNode())) {
+    var text = node.textContent.trim();
+    for (var i = 0; i < PATTERNS_EN_TO_UR.length; i++) {
+      var m = text.match(PATTERNS_EN_TO_UR[i].re);
+      if (m) {
+        node.textContent = node.textContent.replace(text, PATTERNS_EN_TO_UR[i].fn(m));
+        break;
+      }
+    }
+  }
+}
+```
+
+Call `_applyPatternTranslations()` after each `_applyReplaceMap()` call and in the MutationObserver callback.
+
+**Scope**: 10–15 patterns covering the most common dynamic text forms.
+
+**Note**: Pattern replacement runs only when `_lang === 'ur'` and only on text nodes not already replaced by the exact-match pass.
+
+---
+
+### Phase 10 — RTL CSS expansion for full site
+
+The current `RTL_CSS` targets `euiPageBody`, `euiPageContent`, `euiPageContentBody`, and specific application containers. For full-site RTL, expand to cover:
+
+**New RTL CSS rules**:
+
+```css
+/* Sidebar nav item text (direction embed keeps icons LTR, text RTL) */
+.fyp-rtl .euiListGroupItem__label {
+  unicode-bidi: embed;
+  direction: rtl;
+}
+
+/* Flyout panels opened from anywhere */
+.fyp-rtl .euiFlyout,
+.fyp-rtl .euiFlyoutBody {
+  direction: rtl !important;
+}
+.fyp-rtl .euiFlyoutHeader { direction: ltr !important; } /* header icons stay LTR */
+
+/* Modal dialogs */
+.fyp-rtl .euiModal__flex { direction: rtl !important; }
+.fyp-rtl .euiModalHeader { direction: ltr !important; }
+
+/* Context menus / dropdowns */
+.fyp-rtl .euiContextMenuPanel { direction: rtl !important; }
+.fyp-rtl .euiPopover__panel { direction: rtl !important; }
+
+/* Breadcrumbs — reverse display order via flex-direction */
+.fyp-rtl .euiBreadcrumbs { flex-direction: row-reverse !important; }
+
+/* EUI accordion expand/collapse arrows flip */
+.fyp-rtl .euiAccordion__iconWrapper { transform: scaleX(-1); }
+
+/* Align status badges */
+.fyp-rtl .euiBadge { direction: rtl !important; }
+
+/* Tables */
+.fyp-rtl .euiTable { direction: rtl !important; }
+.fyp-rtl .euiTableHeaderCell,
+.fyp-rtl .euiTableRowCell { text-align: right !important; }
+```
+
+**Preserve LTR for**:
+- Toolbar (already has `direction: ltr !important`)
+- Code blocks / pre / `.euiCode` (technical content stays LTR)
+- EUI icons (SVG, stays neutral)
+- Input/search bars: keep `direction: ltr` for query strings, IP addresses, CVE IDs
+
+---
+
+### Phase 11 — Locale persistence and UX polish
+
+**Persistence across sessions** (current + enhancements):
+- `localStorage.fyp_language` → already used for Track A
+- On page load, `loadPreferences()` reads `fyp_language`. If `'ur'` and URL lacks `i18n-locale=ur-PK`, `setLanguage('ur')` fires the reload immediately (before any visible content renders, since it's called 500 ms after `start()`).
+- To avoid reload-loop: check if URL already has `?i18n-locale=ur-PK` before reloading.
+
+```js
+function loadPreferences() {
+  var savedLang = localStorage.getItem('fyp_language');
+  var savedTheme = localStorage.getItem('fyp_theme_v2') || 'light';
+  if (savedTheme === 'dark') setDarkMode(true);
+  if (savedLang === 'ur') {
+    var currentParam = new URL(window.location.href).searchParams.get('i18n-locale');
+    if (currentParam !== 'ur-PK') {
+      // Need reload for OSD chrome — but apply DOM translations immediately while reload fires
+      _lang = 'ur';
+      _applyReplaceMap(EN_TO_UR);
+      _syncLangBtn();
+      document.body.classList.add('fyp-rtl');
+      injectStyle('fyp-rtl-style', RTL_CSS);
+      // Trigger reload for Track B
+      var url = new URL(window.location.href);
+      url.searchParams.set('i18n-locale', 'ur-PK');
+      window.location.replace(url.toString());
+    } else {
+      // URL already has the param — OSD chrome is in Urdu. Apply DOM replacements only.
+      setLanguage('ur');
+    }
+  }
+}
+```
+
+**Toolbar label update**: When on a page with `?i18n-locale=ur-PK`, the "EN" button should make clear it will reload the page. Add a subtitle or `title` tooltip: `"Switch to English (page will reload)"`.
+
+---
+
+### Phase 12 — Testing checklist
+
+**Per-page test matrix** (test each in both EN and UR, with both Light and Dark themes):
+
+| Page | Key checks |
+|------|-----------|
+| wz-home (Overview) | Section badges, module cards, agent summary widget |
+| Agents list | Table columns, status pills, search bar placeholder |
+| Agent detail flyout | Info tabs, section headers |
+| Threat Hunting | Dashboard header, filter bar, table columns, empty state |
+| File Integrity Monitoring | Event type labels, columns |
+| Vulnerability Detection | Severity pills, columns, CVE table |
+| MITRE ATT\&CK | Tactic/technique labels |
+| Configuration Assessment | Pass/Fail/N-A labels, policy columns |
+| Malware Detection | Module title, event columns |
+| Management → Rules | Column headers, filter dropdowns, status labels |
+| Management → Decoders | Column headers |
+| Management → CDB Lists | Page title, actions |
+| Management → Groups | Column headers, agent count |
+| Management → Cluster | Node type labels, daemon status |
+| Management → Status | Running/Stopped labels |
+| Management → Logs | Log level labels |
+| Management → Settings | Section headers, API connection UI |
+| OSD Discover (EN) | Search bar placeholder, date picker, column headers |
+| OSD Discover (UR) | Same with Phase 6 server i18n active |
+| OSD Dashboard management | Panel actions, add panel |
+| Dark mode + Urdu active | Verify no CSS conflicts |
+| Page reload persistence | Reload in Urdu — stays Urdu on every page |
+| Navigate between pages | Urdu persists on SPA navigation (MutationObserver) |
+
+**Regression checks**:
+- Custom plugins (networkGraph, nlqSearch, complianceView) still translate correctly
+- `_t()` / `_tFmt()` helpers in networkGraph and complianceView still work
+- `window.__fypLocale__` still exposed after all changes
+- `fyp-theme-changed` CustomEvent still fires on dark/light toggle
+- Toolbar visible on all pages, not only wz-home
+
+---
+
+### Implementation order and effort estimate
+
+| Phase | Files changed | Effort | Dependencies |
+|-------|--------------|--------|--------------|
+| 0 — Toolbar on all pages | `public/index.js` (5 lines) | 15 min | None |
+| 1 — Overview strings | `locales/en.json`, `locales/ur.json` | 2 h | Phase 0 |
+| 2 — Sidebar nav strings | `locales/en.json`, `locales/ur.json` | 1.5 h | Phase 0 |
+| 3 — Agents page strings | `locales/en.json`, `locales/ur.json` | 2 h | Phase 0 |
+| 4 — Security module strings | `locales/en.json`, `locales/ur.json` | 3 h | Phase 0 |
+| 5 — Management strings | `locales/en.json`, `locales/ur.json` | 2 h | Phase 0 |
+| 6 — Server-side OSD i18n | `server/plugin.js`, `locales/ur-PK.json` (new) | 3 h | Phase 0 |
+| 7 — Client locale switch (reload) | `public/index.js` | 1 h | Phase 6 |
+| 8 — Attribute translation | `public/index.js`, `locales/*.json` | 1.5 h | Phase 1–5 |
+| 9 — Pattern matching | `public/index.js` | 1.5 h | Phases 1–5 |
+| 10 — RTL expansion | `public/index.js` (RTL_CSS block) | 1 h | Phase 0 |
+| 11 — Persistence UX | `public/index.js` | 1 h | Phases 6–7 |
+| 12 — Testing | Manual | 3 h | All phases |
+| **Total** | | **~23 h** | |
+
+**Recommended execution order**: Phase 0 → 1 → 2 → 3 → 10 → 4 → 5 → 8 → 9 → 6 → 7 → 11 → 12. Phases 1–5 and 8–9 are pure data work (adding keys); they can be interleaved with Phase 0 and 10 code changes in one session. Phases 6–7 are a separate server-side session with an OSD restart required.
+
+---
+
+### New files to create
+
+| File | Purpose |
+|------|---------|
+| `locales/ur-PK.json` | OSD native i18n translations (Phase 6). Separate from `ur.json` to keep concerns isolated — `ur.json` is DOM-replacement data, `ur-PK.json` is OSD i18n key data. |
+
+### Files to modify
+
+| File | Changes |
+|------|---------|
+| `public/index.js` | Phase 0 (toolbar), Phase 7 (locale switch reload), Phase 8 (attribute translation), Phase 9 (pattern matching), Phase 10 (RTL CSS), Phase 11 (persistence) |
+| `locales/en.json` | Phases 1–5, 8: ~350 new keys |
+| `locales/ur.json` | Phases 1–5, 8: ~350 new Urdu translations |
+| `server/plugin.js` | Phase 6: register `ur-PK.json` |
+| `install.sh` | Update documentation to reflect expanded scope |
+| `README.md` | Update key count, architecture section, add Phase 6 instructions |
+
+### Status
+
+**Plan complete. No implementation started.**

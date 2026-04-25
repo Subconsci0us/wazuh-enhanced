@@ -43,7 +43,7 @@ const VALID_TIME_RELATIVE = new Set([
 ]);
 
 const VALID_ENTITY_KEYS = new Set([
-  'user', 'user_role', 'src_ip', 'host', 'process',
+  'user', 'user_role', 'src_ip', 'host', 'process', 'process_path', 'command_line',
 ]);
 
 const VALID_GROUP_BY = new Set(['user', 'src_ip', 'host', 'process']);

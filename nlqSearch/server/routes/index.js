@@ -55,115 +55,118 @@ const SCHEMA_SUMMARY = `\
 Produce a JSON object that strictly follows this structure:
 
 {
-  "sec_ir_version": "1.0",          // always exactly "1.0"
-  "event_type": <string>,           // one of the 10 values listed below
-  "pattern": <string>,              // one of: single_event | repeated_attempts | spike | sequence | absence
-  "entity": { <key>: <string> },    // zero or more of: user, user_role, src_ip, host, process
-  "severity": <string>,             // one of: info | low | medium | high | critical | any
-  "time_range": <object>,           // see formats below
-  "aggregation": <object|null>,     // required if pattern is repeated_attempts or spike
-  "correlation": <object|null>      // required if pattern is sequence
+  "sec_ir_version": "1.0",
+  "event_type": <string>,
+  "pattern": <string>,
+  "entity": { <key>: <value> },
+  "severity": <string>,
+  "time_range": <object>,
+  "aggregation": <object|null>,
+  "correlation": <object|null>
 }
 
-event_type values:
-  authentication_failure, privilege_escalation,
-  lateral_movement, port_scan,
-  process_injection, file_deletion,
-  malware_alert, ransomware_behavior,
+── event_type — pick exactly one ──────────────────────────────────────────────
+
+  authentication_failure, privilege_escalation, lateral_movement, port_scan,
+  process_injection, file_deletion, malware_alert, ransomware_behavior,
   policy_violation, data_exfiltration
 
-event_type disambiguation (read carefully — these are the most common confusions):
+Disambiguation (most-confused pairs):
 
-- privilege_escalation: Use when the query names a WINDOWS PRIVILEGE ESCALATION
-  TECHNIQUE. Examples: ntdsutil, vssadmin IFM, DCSync, AD replication from a
-  non-DC, Kerberos ticket anomalies (Golden/Silver Ticket, long TGT lifetime),
-  UAC bypass (fodhelper, computerdefaults, sdclt), WMI event subscriptions for
-  persistence, schtasks creating new tasks, new Windows services pointing at
-  binaries in temp/user dirs, SeDebugPrivilege being granted, LSASS memory
-  access, token manipulation. These are NOT policy_violation — a "policy
-  violation" is an administrative rule breach (unapproved software install,
-  config drift), not an attacker technique.
+- privilege_escalation: Windows priv-esc TTPs — ntdsutil, DCSync, AD replication
+  from non-DC, Kerberos anomalies (Golden/Silver Ticket), UAC bypass, WMI
+  persistence, schtasks adding tasks, new services in user/temp dirs, LSASS
+  access, SeDebugPrivilege, token manipulation. NOT policy_violation.
 
-- ransomware_behavior: Use when shadow copies are being deleted (vssadmin
-  delete shadows, wmic shadowcopy delete, bcdedit disabling recovery), mass
-  file encryption is detected, or rapid large-scale file modification is
-  observed. This is NOT file_deletion even though files are being removed —
-  vssadmin deleting shadows is a ransomware pre-encryption TTP, not routine
-  file cleanup.
+- ransomware_behavior: shadow copy deletion (vssadmin, wmic shadowcopy, bcdedit
+  /set recoveryenabled no), mass file encryption, rapid large-scale file
+  modification. NOT file_deletion.
 
-- malware_alert: Use when the query asks about a KNOWN MALWARE DETECTION
-  PATTERN: threat-intel / IOC matches, contact with known malicious IPs or
-  C2 domains, AV signature hits, LOLBins used suspiciously (regsvr32 or
-  rundll32 loading unusual DLLs, mshta running remote content), Office
-  applications spawning cmd/powershell/wscript (macro malware), suspicious
-  parent-child process chains, clipboard scrapers. This is NOT
-  process_injection (a specific technique — code written into another
-  process's memory space), and NOT data_exfiltration (which requires data
-  actually leaving the environment).
+- malware_alert: IOC/threat-intel matches, C2 contact, AV hits, LOLBins
+  (regsvr32/rundll32/mshta loading remote content), Office spawning
+  cmd/powershell (macro malware), suspicious parent-child process chains.
+  ALSO: any process whose IMAGE PATH is a non-standard location —
+  Temp, AppData, Downloads, ProgramData, Users\\Public, Roaming — is a
+  suspicious execution indicator → malware_alert. NOT policy_violation.
+  NOT process_injection (in-memory injection only).
 
-- process_injection: Use ONLY for explicit in-memory injection techniques:
-  CreateRemoteThread, reflective DLL loading, process hollowing, APC injection,
-  AtomBombing, SetWindowsHookEx. A parent spawning a child process is NOT
-  process injection.
+- process_injection: explicit in-memory injection only — CreateRemoteThread,
+  reflective DLL, process hollowing, APC injection, AtomBombing,
+  SetWindowsHookEx. A parent spawning a child is NOT injection.
 
-- policy_violation: Use for administrative / compliance rule breaches:
-  unauthorized software, config drift, unapproved access from outside business
-  hours, impossible-travel logins, unencrypted data transfers, violated DLP
-  rules. This is the right answer only when no specific attacker TTP fits.
+- policy_violation: administrative/compliance breaches — unauthorized software
+  installs, config drift, out-of-hours access, impossible-travel logins,
+  unencrypted transfers, DLP violations. Only when no attacker TTP fits.
 
-time_range formats:
+── entity — FILTER criteria only ──────────────────────────────────────────────
+
+  CRITICAL: "include X", "show X", "return X", "display the command line",
+  "with timestamp", "along with the username" — these are OUTPUT field requests,
+  NOT filter criteria. Do NOT add entity entries for them. The system always
+  returns all available fields. Only populate entity when the query names a
+  specific value or path pattern to FILTER on.
+
+  Allowed keys and their Wazuh field:
+    user         → data.win.eventdata.targetUserName  (exact username)
+    user_role    → data.win.eventdata.targetUserName  (role/group, e.g. "admin")
+    src_ip       → data.srcip
+    host         → agent.name
+    process      → data.win.eventdata.processName     (exact name, e.g. "cmd.exe")
+    process_path → data.win.eventdata.image           (full exe path — use wildcards)
+    command_line → data.win.eventdata.commandLine     (full command line — use wildcards)
+
+  Wildcard syntax (for process_path and command_line):
+    "*pattern*"  substring match, e.g. "*\\\\Temp\\\\*", "*\\\\AppData\\\\*", "*powershell*"
+    "|" separates OR alternatives, e.g. "*\\\\Temp\\\\*|*\\\\AppData\\\\*"
+    "*" alone means any value — omit the key entirely instead of writing "*"
+
+── time_range ──────────────────────────────────────────────────────────────────
+
   Relative: {"type": "relative", "value": "last_24h"}
-    Allowed values: last_1h | last_6h | last_12h | last_24h | last_7d | last_30d | last_90d
+    Allowed: last_1h | last_6h | last_12h | last_24h | last_7d | last_30d | last_90d
   Absolute: {"type": "absolute", "start": "<ISO8601>", "end": "<ISO8601>"}
 
-aggregation (use when pattern is repeated_attempts or spike):
+── aggregation (pattern = repeated_attempts or spike) ──────────────────────────
+
   {"threshold": <int ≥ 1>, "group_by": [<one or more of: user, src_ip, host, process>]}
 
-correlation (use when pattern is sequence):
-  {
-    "events": [
-      {"event_type": "<event_type>"},
-      {"event_type": "<event_type>"}
-    ],
-    "maxspan": "<number><s|m|h|d>"   // e.g. "10m", "1h"
-  }
+── correlation (pattern = sequence) ────────────────────────────────────────────
 
-Rules:
-- Set aggregation to null when pattern is single_event, sequence, or absence.
-- Set correlation to null unless pattern is sequence.
-- For repeated_attempts / spike, group_by must only use field names that are
-  also present in the entity object.
-- When no time range is mentioned, default to last_24h.
+  {"events": [{"event_type": "..."}, {"event_type": "..."}], "maxspan": "10m"}
 
-Pattern selection rules (apply carefully):
-- Use sequence when the query describes TWO DISTINCT EVENTS that must occur IN
-  ORDER by the same actor — e.g. "failed logins followed by a successful login",
-  "recon then exploit", "login then data export". Populate the correlation block
-  with both event_types and a maxspan. Do NOT use repeated_attempts for these —
-  repeated_attempts is only for the same event happening many times.
-- Use repeated_attempts when the SAME event type recurs above a threshold (e.g.
-  "more than 5 failed logins", "10 port scan attempts").
-- Use spike when the count is anomalously high relative to baseline (e.g.
-  "unusual spike", "much faster than normal", "abnormal volume").
-- Use absence when the query asks whether something did NOT happen.
+── Rules ───────────────────────────────────────────────────────────────────────
 
-Severity inference rules (apply in order — use the HIGHEST matching level):
-  critical : ransomware, data exfiltration, active intrusion, credential dumping
-             (e.g. Mimikatz), lateral movement combined with privilege escalation,
-             multi-stage attack sequences
-  high     : brute force / repeated login failures, privilege escalation,
-             lateral movement, malware detection, process injection, any active
-             attack pattern that is not yet confirmed critical
-  medium   : port scan / reconnaissance, single policy violation, suspicious
-             process execution, file deletion without other indicators
-  low      : single failed login (isolated, not repeated), minor audit finding,
-             informational policy check
-  info     : absence queries (confirming something did NOT happen), audit trails,
-             purely informational lookups with no threat indicator
-  any      : ONLY when the query contains no severity context whatsoever and none
-             of the above rules produce a clear answer. Do NOT use "any" just
-             because the query does not explicitly name a severity — infer from
-             the event type and pattern instead.
+  - aggregation: null when pattern is single_event, sequence, or absence.
+  - correlation: null unless pattern is sequence.
+  - group_by fields must also appear in entity.
+  - When no time range is stated, default to last_24h.
+
+── Pattern selection ───────────────────────────────────────────────────────────
+
+  sequence          — two DISTINCT events in order by the same actor (login then
+                      escalation, recon then exploit). Populate correlation.
+                      NOT for same-event repetition.
+  repeated_attempts — same event type above a threshold. Populate aggregation.
+  spike             — anomalously high volume vs baseline.
+  absence           — event did NOT occur.
+  single_event      — anything else.
+
+── Severity ────────────────────────────────────────────────────────────────────
+
+  Apply in order — use highest matching:
+  critical  ransomware, data exfiltration, active intrusion, credential dumping,
+            multi-stage attack sequences
+  high      brute force, privilege escalation, lateral movement, malware
+            detection, process injection
+  medium    port scan, policy violation, suspicious process execution, file
+            deletion alone
+  low       single isolated failed login, minor audit finding
+  info      absence queries, purely informational lookups with no threat indicator
+  any       investigative/listing queries without a threat level — "show me all X",
+            "list", "find all", "what processes", "which hosts" — when the analyst
+            wants visibility across all severity levels and has not framed the
+            query as a specific threat detection. Use any when the query is about
+            hunting or inventory, not alerting.
 `;
 
 const FEW_SHOT = `\
@@ -264,6 +267,30 @@ Query: "Detect a user who has multiple failed logins followed by a successful lo
     ],
     "maxspan": "5m"
   }
+}
+
+Query: "Show me all processes launched from temporary directories or AppData. Include the process name, username, full command line, and timestamp."
+{
+  "sec_ir_version": "1.0",
+  "event_type": "malware_alert",
+  "pattern": "single_event",
+  "entity": {"process_path": "*\\\\Temp\\\\*|*\\\\AppData\\\\*"},
+  "severity": "any",
+  "time_range": {"type": "relative", "value": "last_24h"},
+  "aggregation": null,
+  "correlation": null
+}
+
+Query: "Find powershell processes launched by Office applications in the last 7 days"
+{
+  "sec_ir_version": "1.0",
+  "event_type": "malware_alert",
+  "pattern": "single_event",
+  "entity": {"process": "powershell.exe", "command_line": "*winword*|*excel*|*outlook*"},
+  "severity": "high",
+  "time_range": {"type": "relative", "value": "last_7d"},
+  "aggregation": null,
+  "correlation": null
 }
 `;
 
@@ -554,6 +581,13 @@ function defineRoutes(router, logger) {
           'rule.groups',
           'data.srcip',
           'data.dstip',
+          'data.win.eventdata.image',
+          'data.win.eventdata.commandLine',
+          'data.win.eventdata.processName',
+          'data.win.eventdata.targetUserName',
+          'data.win.eventdata.user',
+          'data.win.eventdata.parentImage',
+          'data.win.eventdata.parentCommandLine',
         ],
       });
       // Remove non-DSL fields that would cause OpenSearch to reject the query

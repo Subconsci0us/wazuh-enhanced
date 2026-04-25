@@ -12,11 +12,13 @@
 // ── Field mappings: IR entity key → Wazuh / OpenSearch field name ────────────
 
 const ENTITY_FIELD_MAP = {
-  user:      'data.win.eventdata.targetUserName',
-  user_role: 'data.win.eventdata.targetUserName',
-  src_ip:    'data.srcip',
-  host:      'agent.name',
-  process:   'data.win.eventdata.processName',
+  user:         'data.win.eventdata.targetUserName',
+  user_role:    'data.win.eventdata.targetUserName',
+  src_ip:       'data.srcip',
+  host:         'agent.name',
+  process:      'data.win.eventdata.processName',
+  process_path: 'data.win.eventdata.image',
+  command_line: 'data.win.eventdata.commandLine',
 };
 
 // ── Event-type → Wazuh rule.groups value(s) ──────────────────────────────────
@@ -68,13 +70,34 @@ function timeFilter(timeRange) {
 
 // ── Filter clause builders ────────────────────────────────────────────────────
 
+function makeFieldClause(field, value) {
+  if (value.includes('*')) {
+    return { wildcard: { [field]: { value, case_insensitive: true } } };
+  }
+  return { match: { [field]: value } };
+}
+
 function entityFilters(entity) {
   const filters = [];
   for (const [key, value] of Object.entries(entity || {})) {
-    if (value === '*' || value === '') continue;
+    if (!value || value === '*') continue;
     const field = ENTITY_FIELD_MAP[key];
     if (!field) continue;
-    filters.push({ match: { [field]: value } });
+
+    // Pipe separates OR alternatives (e.g. "*\\Temp\\*|*\\AppData\\*")
+    const parts = value.split('|').map(v => v.trim()).filter(v => v && v !== '*');
+    if (parts.length === 0) continue;
+
+    if (parts.length === 1) {
+      filters.push(makeFieldClause(field, parts[0]));
+    } else {
+      filters.push({
+        bool: {
+          should: parts.map(v => makeFieldClause(field, v)),
+          minimum_should_match: 1,
+        },
+      });
+    }
   }
   return filters;
 }

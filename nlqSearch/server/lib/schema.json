@@ -33,11 +33,13 @@
       "type": "object",
       "additionalProperties": false,
       "properties": {
-        "user":      { "type": "string" },
-        "user_role": { "type": "string" },
-        "src_ip":    { "type": "string" },
-        "host":      { "type": "string" },
-        "process":   { "type": "string" }
+        "user":         { "type": "string" },
+        "user_role":    { "type": "string" },
+        "src_ip":       { "type": "string" },
+        "host":         { "type": "string" },
+        "process":      { "type": "string" },
+        "process_path": { "type": "string" },
+        "command_line": { "type": "string" }
       }
     },
     "severity": {

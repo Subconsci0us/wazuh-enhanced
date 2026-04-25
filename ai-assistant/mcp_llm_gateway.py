@@ -90,8 +90,7 @@ BEDROCK_MODEL_ID = os.getenv("BEDROCK_MODEL_ID", "anthropic.claude-3-sonnet-2024
 ALERTS_INDEX = os.getenv("ALERTS_INDEX", "wazuh-alerts-*")
 VULN_INDEX = os.getenv("VULN_INDEX", "wazuh-states-vulnerabilities-*")
 DEFAULT_TIME_WINDOW = os.getenv("DEFAULT_TIME_WINDOW", "now-30m")
-
-
+ANOMALY_INDEX = os.getenv("ANOMALY_INDEX", "opensearch-ad-plugin-result-wazuh")
 
 
 # ============================================================================
@@ -123,6 +122,7 @@ def load_system_prompt() -> str:
         replacements = {
             "{ALERTS_INDEX}": ALERTS_INDEX,
             "{VULN_INDEX}": VULN_INDEX,
+            "{ANOMALY_INDEX}": ANOMALY_INDEX,
             "{DEFAULT_TIME_WINDOW}": DEFAULT_TIME_WINDOW,
         }
         for old, new in replacements.items():
@@ -134,6 +134,7 @@ def load_system_prompt() -> str:
             f"\n\nRemember:\n"
             f"- Use {ALERTS_INDEX} for alerts.\n"
             f"- Use {VULN_INDEX} for vulnerabilities.\n"
+            f"- Use {ANOMALY_INDEX} for anomaly detection results.\n"
             f"- Default time range: {DEFAULT_TIME_WINDOW}.\n"
         )
 
