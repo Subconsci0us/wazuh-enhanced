@@ -377,16 +377,59 @@ function escHtml(str) {
     .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 }
 
+// ── Dark mode CSS injected once into document.head ───────────────────────────
+// Uses !important to beat inline style.cssText assignments in mountApp().
+(function injectNlqDarkCSS() {
+  if (document.getElementById('nlq-dark-style')) return;
+  var el = document.createElement('style');
+  el.id = 'nlq-dark-style';
+  el.textContent = [
+    '.nlq-root.nlq-dark{background:#0d1527 !important;color:#e2e8f0 !important;}',
+    '.nlq-root.nlq-dark .nlq-header{background:#0d1527 !important;border-bottom-color:#334155 !important;}',
+    '.nlq-root.nlq-dark .nlq-search-area{background:#0d1527 !important;border-bottom-color:#334155 !important;}',
+    '.nlq-root.nlq-dark .nlq-ir-area{background:#1e293b !important;border-bottom-color:#334155 !important;}',
+    '.nlq-root.nlq-dark .nlq-dsl-input-area{background:#1e293b !important;border-bottom-color:#334155 !important;}',
+    '.nlq-root.nlq-dark textarea{background:#1e293b !important;color:#e2e8f0 !important;border-color:#334155 !important;}',
+    '.nlq-root.nlq-dark .nlq-ir-editor{color:#4ade80 !important;}',
+    '.nlq-root.nlq-dark .nlq-dsl-display{background:#1e293b !important;color:#fb923c !important;border-color:#334155 !important;}',
+    '.nlq-root.nlq-dark .nlq-dsl-input-editor{color:#fb923c !important;}',
+    '.nlq-root.nlq-dark .nlq-results-area{background:#0d1527 !important;}',
+    '.nlq-root.nlq-dark .nlq-summary{border-bottom-color:#334155 !important;}',
+    '.nlq-root.nlq-dark .nlq-table thead tr{background:#1e293b !important;color:#94a3b8 !important;}',
+    '.nlq-root.nlq-dark .nlq-table tbody tr{background:#0f172a !important;}',
+    '.nlq-root.nlq-dark .nlq-table tbody tr:nth-child(even){background:#1a2234 !important;}',
+    '.nlq-root.nlq-dark .nlq-table td{border-bottom-color:#334155 !important;color:#e2e8f0 !important;}',
+    '.nlq-root.nlq-dark .nlq-retranspile-btn{background:#1e293b !important;color:#f87171 !important;border-color:#334155 !important;}',
+    '.nlq-root.nlq-dark .nlq-toggle-btn{background:#1e293b !important;color:#94a3b8 !important;border-color:#334155 !important;}',
+    '.nlq-root.nlq-dark .nlq-mode-btn-inactive{background:#1e293b !important;color:#94a3b8 !important;}',
+    '.nlq-root.nlq-dark .nlq-section-title{color:#60a5fa !important;}',
+    '.nlq-root.nlq-dark .nlq-note{color:#64748b !important;}',
+    '.nlq-root.nlq-dark .nlq-status{color:#64748b !important;}',
+  ].join('');
+  (document.head || document.documentElement).appendChild(el);
+}());
+
+function applyNlqTheme(el) {
+  var dark = (function() {
+    try { return localStorage.getItem('fyp_theme_v2') === 'dark'; } catch (_) { return false; }
+  }());
+  el.classList.toggle('nlq-dark', dark);
+}
+
 function mountApp(params) {
   var el = params.element;
+  el.className = 'nlq-root';
   el.style.cssText =
     'width:100%;min-height:100vh;display:flex;flex-direction:column;' +
     'background:#f8fafc;color:#1a202c;font-family:Inter,sans-serif;overflow:auto;box-sizing:border-box;';
+  applyNlqTheme(el);
+  window.addEventListener('fyp-theme-changed', function() { applyNlqTheme(el); });
 
   var state = { mode: 'english', ir: null, wazuhQuery: null, corrRounds: 0, hits: [], total: 0 };
 
   /* ── Header ── */
   var header = document.createElement('div');
+  header.className = 'nlq-header';
   header.style.cssText =
     'display:flex;align-items:center;padding:12px 20px;' +
     'background:#f1f5f9;border-bottom:1px solid #e2e8f0;flex-shrink:0;gap:12px;';
@@ -397,6 +440,7 @@ function mountApp(params) {
 
   /* ── Search area ── */
   var searchArea = document.createElement('div');
+  searchArea.className = 'nlq-search-area';
   searchArea.style.cssText =
     'padding:16px 20px;background:#f1f5f9;border-bottom:1px solid #e2e8f0;flex-shrink:0;';
 
@@ -437,12 +481,14 @@ function mountApp(params) {
   searchArea.appendChild(inputRow);
 
   var statusLine = document.createElement('div');
+  statusLine.className = 'nlq-status';
   statusLine.style.cssText = 'margin-top:8px;font-size:12px;color:#888;min-height:16px;';
   searchArea.appendChild(statusLine);
   el.appendChild(searchArea);
 
   /* ── IR area ── */
   var irArea = document.createElement('div');
+  irArea.className = 'nlq-ir-area';
   irArea.style.cssText =
     'padding:0 20px;background:#f8fafc;border-bottom:1px solid #e2e8f0;display:none;';
 
@@ -461,11 +507,13 @@ function mountApp(params) {
   irSection.appendChild(irHeader);
 
   var irNote = document.createElement('div');
+  irNote.className = 'nlq-note';
   irNote.style.cssText = 'font-size:11px;color:#718096;margin-bottom:6px;';
   irNote.textContent = 'Edit the JSON and click Re-transpile to regenerate DSL without another LLM call.';
   irSection.appendChild(irNote);
 
   var irEditor = document.createElement('textarea');
+  irEditor.className = 'nlq-ir-editor';
   irEditor.style.cssText =
     'width:100%;min-height:180px;padding:10px;background:#f8fafc;color:#276749;' +
     'border:1px solid #e2e8f0;border-radius:4px;font-family:monospace;font-size:12px;' +
@@ -490,6 +538,7 @@ function mountApp(params) {
   dslSection.appendChild(dslHeader);
 
   var dslDisplay = document.createElement('pre');
+  dslDisplay.className = 'nlq-dsl-display';
   dslDisplay.style.cssText =
     'padding:10px;background:#f8fafc;color:#744210;border:1px solid #e2e8f0;' +
     'border-radius:4px;font-size:12px;overflow:auto;max-height:240px;white-space:pre-wrap;';
@@ -505,12 +554,14 @@ function mountApp(params) {
 
   /* ── DSL direct input area ── */
   var dslInputArea = document.createElement('div');
+  dslInputArea.className = 'nlq-dsl-input-area';
   dslInputArea.style.cssText =
     'padding:12px 20px;background:#f8fafc;border-bottom:1px solid #e2e8f0;display:none;';
   dslInputArea.innerHTML =
     '<div style="font-size:13px;font-weight:600;color:#2b6cb0;margin-bottom:8px;">Wazuh DSL Query (JSON)</div>';
 
   var dslInputEditor = document.createElement('textarea');
+  dslInputEditor.className = 'nlq-dsl-input-editor';
   dslInputEditor.placeholder = '{\n  "query": { "bool": { "must": [ ... ] } }\n}';
   dslInputEditor.style.cssText =
     'width:100%;min-height:180px;padding:10px;background:#f8fafc;color:#744210;' +
@@ -521,6 +572,7 @@ function mountApp(params) {
 
   /* ── Results area — always visible (flex:1 fills remaining height, fixes whitespace) ── */
   var resultsArea = document.createElement('div');
+  resultsArea.className = 'nlq-results-area';
   resultsArea.style.cssText = 'padding:16px 20px;flex:1;overflow:auto;min-height:0;';
   el.appendChild(resultsArea);
 
@@ -681,6 +733,7 @@ function mountApp(params) {
   function renderResults(hits, total, index) {
     resultsArea.innerHTML = '';
     var summary = document.createElement('div');
+    summary.className = 'nlq-summary';
     summary.style.cssText =
       'display:flex;align-items:center;justify-content:space-between;' +
       'margin-bottom:12px;padding-bottom:8px;border-bottom:1px solid #e2e8f0;';
@@ -703,6 +756,7 @@ function mountApp(params) {
     var tableWrap = document.createElement('div');
     tableWrap.style.overflowX = 'auto';
     var table = document.createElement('table');
+    table.className = 'nlq-table';
     table.style.cssText = 'width:100%;border-collapse:collapse;font-size:12px;';
     table.innerHTML =
       '<thead><tr style="background:#f1f5f9;color:#4a5568;text-align:left;">' +

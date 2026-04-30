@@ -3,11 +3,26 @@
 # install.sh — Build and install the localization OSD plugin
 #
 # Implements:
-#   • Floating toolbar with EN / UR language toggle (dual always-visible buttons)
-#   • Dark / light theme toggle (button hidden by default — TEMPORARY)
-#   • fyp-theme-changed CustomEvent dispatched on theme change so other plugins
-#     (networkGraph, nlqSearch, complianceView) can react
-#   • localStorage keys: fyp_language, fyp_theme_v2
+#   • Floating toolbar (bottom-right) visible on ALL pages — EN/UR toggle +
+#     dark/light theme toggle
+#   • Single language toggle: shows target language (UR when in EN, EN when in UR)
+#   • Phase 7: language toggle reloads page with ?locale=ur-PK so OSD native
+#     i18n (Discover, Dashboard, Settings chrome) renders in Urdu automatically
+#   • Phase 8: attribute translation — placeholder, title, aria-label attrs
+#     are also translated by the DOM replacement pass
+#   • 300 locale keys covering the entire Wazuh site:
+#       - Overview section badges and module card names
+#       - Navigation sidebar (all Wazuh + OSD nav items)
+#       - Agents page columns, status labels, detail panel
+#       - Security modules: severity levels, FIM events, CA pass/fail, MITRE
+#       - Management: Rules, Decoders, Groups, Cluster, Logs, Settings, API
+#       - Common action buttons and empty-state messages
+#   • Dark mode: injects DARK_CSS block into <head>; default is light
+#   • RTL: adds fyp-rtl class to body when Urdu active; content area goes RTL,
+#     header/sidebar stay LTR
+#   • fyp-theme-changed CustomEvent dispatched on theme change for other plugins
+#   • window.__fypLocale__ exposed in setup() for _t()/_tFmt() helpers
+#   • localStorage keys: fyp_language ('en'|'ur'), fyp_theme_v2 ('light'|'dark')
 #
 # Usage (run as root or with sudo):
 #   bash install.sh              # build, install, restart wazuh-dashboard
@@ -76,12 +91,20 @@ fi
 
 mkdir -p "${INSTALL_DIR}/target/public"
 mkdir -p "${INSTALL_DIR}/server"
+mkdir -p "${INSTALL_DIR}/translations"
 
 cp "${BUILD_DIR}/opensearch_dashboards.json" "${INSTALL_DIR}/"
 cp "${BUILD_DIR}/package.json"               "${INSTALL_DIR}/"
+cp "${BUILD_DIR}/.i18nrc.json"               "${INSTALL_DIR}/"
 cp "${BUILD_DIR}/server/index.js"            "${INSTALL_DIR}/server/"
 cp "${BUILD_DIR}/server/plugin.js"           "${INSTALL_DIR}/server/"
 cp "${BUNDLE}" "${INSTALL_DIR}/target/public/"
+
+# Phase 6: OSD native i18n — copy ur-PK translation bundle
+if [ -d "${BUILD_DIR}/translations" ]; then
+  cp -r "${BUILD_DIR}/translations/." "${INSTALL_DIR}/translations/"
+  echo "      Translations: $(ls "${INSTALL_DIR}/translations/")"
+fi
 
 if id wazuh-dashboard >/dev/null 2>&1; then
   chown -R wazuh-dashboard:wazuh-dashboard "${INSTALL_DIR}"
@@ -110,10 +133,25 @@ echo ""
 echo "=== Installation complete ==="
 echo ""
 echo "The localization toolbar appears as a floating pill (bottom-right corner)"
-echo "on the main Wazuh Dashboard home page only (app: wz-home)."
+echo "on EVERY page of the Wazuh Dashboard."
 echo ""
-echo "  EN | UR  — language toggle (active = solid blue #3b82f6, inactive = muted outline)"
+echo "  UR / EN  — single toggle showing target language (click to switch)"
 echo "  Theme    — dark/light toggle (☾ Dark / ☀ Light)"
+echo ""
+echo "300 locale keys cover: Overview, nav sidebar, Agents, security modules,"
+echo "Management (Rules/Decoders/Groups/Cluster/Logs/Settings), action buttons."
+echo ""
+echo "Phase 6 — OSD native i18n:"
+echo "  .i18nrc.json + translations/ur-PK.json registered with OSD at startup."
+echo "  ~110 OSD chrome keys: pagination, date picker, modals, dashboard, EUI components."
+echo ""
+echo "Phase 7 — URL locale switch:"
+echo "  Clicking UR/EN reloads the page with/without ?locale=ur-PK so OSD React"
+echo "  components (<FormattedMessage>) also render in Urdu."
+echo ""
+echo "Phase 8 — Attribute translation:"
+echo "  placeholder, title (tooltips), and aria-label attributes are translated"
+echo "  by the DOM replacement pass alongside visible text nodes."
 echo ""
 echo "localStorage keys used:"
 echo "  fyp_language  — 'en' or 'ur'"

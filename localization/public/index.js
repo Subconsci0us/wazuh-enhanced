@@ -52,6 +52,12 @@ var _origReplaceState = null;  // saved history.replaceState before override
 var DARK_CSS = [
   /* Base */
   'html, body { background-color: #0f172a !important; color: #e2e8f0 !important; }',
+
+  /* OSD initial loading screen — shown before React mounts */
+  '.osdWelcomeView { background-color: #0f172a !important; color: #e2e8f0 !important; }',
+  '.osdWelcomeTitle { color: #e2e8f0 !important; }',
+  '.osdWelcomeText { color: #94a3b8 !important; }',
+  '.osdProgress { background-color: #1e293b !important; }',
   '*, *::before, *::after { border-color: #334155 !important; }',
   'a { color: #60a5fa !important; }',
   'a:hover { color: #93c5fd !important; }',
@@ -220,14 +226,68 @@ var DARK_CSS = [
   '.content-wrapper, .main-wrapper, .app-wrapper, .page-wrapper { background: #0f172a !important; }',
   '[class*="container"]:not(#fyp-toolbar) { background-color: inherit; }',
 
+  /* Wazuh sidebar navigation menu */
+  '.wz-menu, .wz-menu-sections { background: #0d1527 !important; }',
+  '.wz-menu-agent-info { background-color: #0d1527 !important; }',
+  '.wz-menu-select-option { background: #1e293b !important; color: #e2e8f0 !important; }',
+  '.wz-module-header-nav { background: #0d1527 !important; }',
+  '.wz-welcome-page-agent-tabs { background-color: #0d1527 !important; }',
+  '.wz-circle-back-button { background: #1e293b !important; }',
+  '.wz-input-text { background: #1e293b !important; color: #e2e8f0 !important; }',
+  '.registerAgent, .register-agent-wizard-container { background: #0f172a !important; }',
+  '.history-list { background: #1e293b !important; }',
+
+  /* OSD Overview page header and typeahead */
+  '.osdOverviewPageHeader { background-color: #0d1527 !important; border-bottom-color: #334155 !important; }',
+  '.osdTypeahead__popover { background-color: #1e293b !important; color: #e2e8f0 !important; }',
+
+  /* Misc Wazuh UI */
+  '.cancelBtn { background: #1e293b !important; color: #e2e8f0 !important; }',
+  '.panel-heading { color: #e2e8f0 !important; }',
+  '.error-notify { color: #f87171 !important; }',
+  '.dshExitFullScreenButton { background: #1e293b !important; color: #e2e8f0 !important; }',
+  '.cv-ov-card { background: #1e293b !important; border-color: #334155 !important; }',
+
+  /* Wazuh health-check / API loading screen */
+  '.application, .application.tab-health-check { background: #0f172a !important; }',
+  /* OSD app mount wrapper — contains the Wazuh health-check React tree */
+  '[id^="application-"] { background: #0f172a !important; }',
+  '.healthCheck { background-color: #0f172a !important; color: #e2e8f0 !important; }',
+  '.health-check { background-color: #0f172a !important; color: #e2e8f0 !important; }',
+  '.health-check h2, .health-check h3, .health-check p, .health-check span, .health-check li { color: #e2e8f0 !important; }',
+  '.health-check-error { color: #f87171 !important; }',
+  '.health-check .euiDescriptionList dd { color: #e2e8f0 !important; }',
+  '.health-check .euiDescriptionList dt { color: #94a3b8 !important; }',
+  '.percentage { color: #94a3b8 !important; }',
+  '.small-text { color: #94a3b8 !important; }',
+  '.checks-fail { color: #f87171 !important; }',
+  '[class*="agent"] { background: #0f172a !important; }',
+
   /* Custom plugins use their own inline styles; dark mode applies to them normally */
 ].join('\n');
+
+// ── Early dark-mode injection ─────────────────────────────────────────────────
+// Inject DARK_CSS synchronously at module-load time (before setup/start/setTimeout).
+// This prevents the 500 ms window where the Wazuh health-check and OSD loading
+// screens render in light mode before loadPreferences() fires.
+(function() {
+  try {
+    if (localStorage.getItem('fyp_theme_v2') === 'dark') {
+      var _earlyEl = document.createElement('style');
+      _earlyEl.id = 'fyp-dark-mode';
+      _earlyEl.textContent = DARK_CSS;
+      (document.head || document.documentElement).appendChild(_earlyEl);
+      _dark = true;
+    }
+  } catch (_) {}
+}());
 
 // ── RTL CSS ───────────────────────────────────────────────────────────────────
 // Applied when Urdu is active. Flips the page content area only; the
 // dashboard header and sidebar stay LTR so navigation remains usable.
 
 var RTL_CSS = [
+  /* ── Page content area — RTL ── */
   '.fyp-rtl .euiPageBody,',
   '.fyp-rtl .euiPageContent,',
   '.fyp-rtl .euiPageContentBody,',
@@ -235,6 +295,8 @@ var RTL_CSS = [
   '.fyp-rtl [data-application-id] {',
   '  direction: rtl !important;',
   '}',
+
+  /* ── Chrome — stay LTR ── */
   '.fyp-rtl .euiHeader,',
   '.fyp-rtl .euiCollapsibleNav,',
   '.fyp-rtl .euiNavDrawer,',
@@ -242,9 +304,59 @@ var RTL_CSS = [
   '.fyp-rtl .globalNavContent {',
   '  direction: ltr !important;',
   '}',
+
+  /* ── Sidebar nav item text: embed lets icon stay LTR, label text reads RTL ── */
+  '.fyp-rtl .euiListGroupItem__label {',
+  '  unicode-bidi: embed !important;',
+  '  direction: rtl !important;',
+  '}',
+
+  /* ── Flyout panels ── */
+  '.fyp-rtl .euiFlyout,',
+  '.fyp-rtl .euiFlyoutBody {',
+  '  direction: rtl !important;',
+  '}',
+  '.fyp-rtl .euiFlyoutHeader { direction: ltr !important; }',
+
+  /* ── Modal dialogs ── */
+  '.fyp-rtl .euiModal__flex { direction: rtl !important; }',
+  '.fyp-rtl .euiModalHeader { direction: ltr !important; }',
+
+  /* ── Context menus / popovers / dropdowns ── */
+  '.fyp-rtl .euiContextMenuPanel { direction: rtl !important; }',
+  '.fyp-rtl .euiPopover__panel,',
+  '.fyp-rtl .euiPopoverPanel { direction: rtl !important; }',
+
+  /* ── Breadcrumbs — reverse visual order ── */
+  '.fyp-rtl .euiBreadcrumbs { flex-direction: row-reverse !important; }',
+
+  /* ── Accordion expand/collapse arrow mirrors ── */
+  '.fyp-rtl .euiAccordion__iconWrapper { transform: scaleX(-1) !important; }',
+
+  /* ── Badges ── */
+  '.fyp-rtl .euiBadge { direction: rtl !important; }',
+
+  /* ── Tables ── */
   '.fyp-rtl table, .fyp-rtl .euiTable { direction: rtl !important; }',
   '.fyp-rtl th, .fyp-rtl td { text-align: right !important; }',
-  '.fyp-rtl input, .fyp-rtl textarea { text-align: right !important; direction: rtl !important; }',
+  '.fyp-rtl .euiTableHeaderCell,',
+  '.fyp-rtl .euiTableRowCell { text-align: right !important; }',
+
+  /* ── Tabs ── */
+  '.fyp-rtl .euiTabs { flex-direction: row-reverse !important; }',
+
+  /* ── Keep LTR: technical inputs, code, search bars, toolbar ── */
+  '.fyp-rtl input[type="text"],',
+  '.fyp-rtl input[type="search"],',
+  '.fyp-rtl input[type="number"],',
+  '.fyp-rtl .euiFieldSearch,',
+  '.fyp-rtl .euiFieldText,',
+  '.fyp-rtl .euiCodeBlock,',
+  '.fyp-rtl pre,',
+  '.fyp-rtl code {',
+  '  direction: ltr !important;',
+  '  text-align: left !important;',
+  '}',
   '#fyp-toolbar { direction: ltr !important; }',
 ].join('\n');
 
@@ -422,10 +534,10 @@ function _syncLangBtn(btn) {
   if (!btn) return;
   if (_lang === 'en') {
     btn.textContent = 'UR';
-    btn.title       = 'Switch to Urdu / اردو میں تبدیل کریں';
+    btn.title       = 'Switch to Urdu — page will reload / اردو میں تبدیل کریں';
   } else {
     btn.textContent = 'EN';
-    btn.title       = 'Switch to English';
+    btn.title       = 'Switch to English — page will reload';
   }
 }
 
@@ -459,14 +571,52 @@ function setDarkMode(enabled) {
   } catch (_) {}
 }
 
+// ── Phase 7: URL-based OSD locale switching ───────────────────────────────────
+// OSD's rendering service reads ?locale= from the URL and serves the matching
+// registered translation bundle (ur-PK) to React components (<FormattedMessage>).
+// We reload the page with/without ?locale=ur-PK so OSD chrome (Discover, Dashboard
+// Settings) is also translated via the native i18n system.
+//
+// Returns true if a page reload was triggered (caller should return early).
+
+function _ensureLocaleUrl(targetLang) {
+  try {
+    // Never touch the URL on login/logout/auth pages — those routes reject
+    // unknown query parameters (OSD returns 400 "locale key missing").
+    var path = window.location.pathname;
+    if (/\/(login|logout|auth)/i.test(path)) return false;
+
+    var url = new URL(window.location.href);
+    var current = url.searchParams.get('locale');
+    if (targetLang === 'ur') {
+      if (current !== 'ur-PK') {
+        url.searchParams.set('locale', 'ur-PK');
+        window.location.replace(url.toString());
+        return true;
+      }
+    } else {
+      if (current) {
+        url.searchParams.delete('locale');
+        window.location.replace(url.toString());
+        return true;
+      }
+    }
+  } catch (_) {}
+  return false;
+}
+
 // ── Language / translation ────────────────────────────────────────────────────
 
 function setLanguage(lang) {
   if (lang !== 'en' && lang !== 'ur') return;
 
-  var previous = _lang;
   _lang = lang;
   try { localStorage.setItem('fyp_language', lang); } catch (_) {}
+
+  // Phase 7: trigger OSD page reload with the right ?locale= param.
+  // If the URL already has the correct locale, _ensureLocaleUrl returns false
+  // and we continue with the DOM-replacement path below (Track A).
+  if (_ensureLocaleUrl(lang)) return;
 
   // Update global locale interface
   if (window.__fypLocale__) {
@@ -482,9 +632,10 @@ function setLanguage(lang) {
     injectStyle('fyp-rtl-style', '');
   }
 
-  // Replace DOM text
+  // Replace DOM text (Track A — Wazuh strings hardcoded in minified bundles)
   var map = lang === 'ur' ? EN_TO_UR : UR_TO_EN;
   _applyReplaceMap(map);
+  _applyPatternTranslations(); // Phase 9: regex pass for dynamic strings
 
   _syncLangBtn();
 
@@ -536,16 +687,19 @@ function _applyReplaceMap(replaceMap) {
     u.node.textContent = u.raw.replace(u.trimmed, replaceMap[u.trimmed]);
   });
 
-  // placeholder attributes
-  try {
-    document.querySelectorAll('[placeholder]').forEach(function(el) {
-      if (_isInsideToolbar(el)) return;
-      var ph = (el.getAttribute('placeholder') || '').trim();
-      if (ph && Object.prototype.hasOwnProperty.call(replaceMap, ph)) {
-        el.setAttribute('placeholder', replaceMap[ph]);
-      }
-    });
-  } catch (_) {}
+  // Phase 8: attribute translation — placeholder, title, aria-label
+  var attrNames = ['placeholder', 'title', 'aria-label'];
+  attrNames.forEach(function(attr) {
+    try {
+      document.querySelectorAll('[' + attr + ']').forEach(function(el) {
+        if (_isInsideToolbar(el)) return;
+        var val = (el.getAttribute(attr) || '').trim();
+        if (val && Object.prototype.hasOwnProperty.call(replaceMap, val)) {
+          el.setAttribute(attr, replaceMap[val]);
+        }
+      });
+    } catch (_) {}
+  });
 }
 
 function _isInsideToolbar(el) {
@@ -555,6 +709,251 @@ function _isInsideToolbar(el) {
     cur = cur.parentElement;
   }
   return false;
+}
+
+// ── Phase 9: Dynamic pattern translations ─────────────────────────────────────
+// Wazuh inlines many strings that include live numbers (agent counts, page ranges,
+// relative timestamps).  These never match the exact-key map, so a separate regex
+// pass handles them.  Runs only when _lang === 'ur'.
+
+var PATTERNS_UR = [
+  // "Showing 1 - 25 of 1,234 agents" / "Showing 1 – 25 of 1,234"
+  {
+    re: /^Showing (\d[\d,]*)\s*[-–]\s*(\d[\d,]*) of (\d[\d,]*)(.*)$/i,
+    fn: function(m) { return m[1] + ' سے ' + m[2] + ' تک، کل ' + m[3] + m[4]; }
+  },
+  // "1 - 25 of 1,234" (pager without leading word)
+  {
+    re: /^(\d[\d,]*)\s*[-–]\s*(\d[\d,]*) of (\d[\d,]*)$/,
+    fn: function(m) { return m[1] + ' - ' + m[2] + ' از ' + m[3]; }
+  },
+  // "X agent(s)" / "X agents" / "X Agents"
+  {
+    re: /^(\d[\d,]*)\s+[Aa]gent\(?s?\)?(.*)$/,
+    fn: function(m) { return m[1] + ' ایجنٹ' + m[2]; }
+  },
+  // "X result(s)" / "X results"
+  {
+    re: /^(\d[\d,]*)\s+[Rr]esults?(.*)$/,
+    fn: function(m) { return m[1] + ' نتائج' + m[2]; }
+  },
+  // "X of Y selected"
+  {
+    re: /^(\d+) of (\d+) selected$/i,
+    fn: function(m) { return m[1] + ' از ' + m[2] + ' منتخب'; }
+  },
+  // "Page X of Y"
+  {
+    re: /^Page (\d+) of (\d+)$/i,
+    fn: function(m) { return 'صفحہ ' + m[1] + ' از ' + m[2]; }
+  },
+  // "X rows per page"
+  {
+    re: /^(\d+) rows? per page$/i,
+    fn: function(m) { return 'فی صفحہ ' + m[1] + ' قطاریں'; }
+  },
+  // Relative timestamps
+  { re: /^(\d+)\s+second[s]?\s+ago$/i,    fn: function(m) { return m[1] + ' سیکنڈ پہلے'; } },
+  { re: /^(\d+)\s+minute[s]?\s+ago$/i,    fn: function(m) { return m[1] + ' منٹ پہلے'; } },
+  { re: /^(\d+)\s+hour[s]?\s+ago$/i,      fn: function(m) { return m[1] + ' گھنٹے پہلے'; } },
+  { re: /^(\d+)\s+day[s]?\s+ago$/i,       fn: function(m) { return m[1] + ' دن پہلے'; } },
+  { re: /^(\d+)\s+week[s]?\s+ago$/i,      fn: function(m) { return m[1] + ' ہفتے پہلے'; } },
+  { re: /^(\d+)\s+month[s]?\s+ago$/i,     fn: function(m) { return m[1] + ' ماہ پہلے'; } },
+  { re: /^just now$/i,                     fn: function()  { return 'ابھی'; } },
+  // "Last updated: <anything>" / "Last keep-alive: <anything>"
+  {
+    re: /^Last updated[:\s]+(.+)$/i,
+    fn: function(m) { return 'آخری تازہ کاری: ' + m[1]; }
+  },
+  {
+    re: /^Last keep-alive[:\s]+(.+)$/i,
+    fn: function(m) { return 'آخری رابطہ: ' + m[1]; }
+  },
+  // "X alerts" / "X Alerts"
+  {
+    re: /^(\d[\d,]*)\s+[Aa]lerts?(.*)$/,
+    fn: function(m) { return m[1] + ' الرٹس' + m[2]; }
+  },
+  // "X events" / "X Events"
+  {
+    re: /^(\d[\d,]*)\s+[Ee]vents?(.*)$/,
+    fn: function(m) { return m[1] + ' واقعات' + m[2]; }
+  },
+  // Severity filter buttons: "Critical (N)" / "High (N)" / "Medium (N)" / "Low (N)"
+  {
+    re: /^Critical\s*\((\d[\d,]*)\)(.*)$/i,
+    fn: function(m) { return 'سنگین (' + m[1] + ')' + m[2]; }
+  },
+  {
+    re: /^High\s*\((\d[\d,]*)\)(.*)$/i,
+    fn: function(m) { return 'بلند (' + m[1] + ')' + m[2]; }
+  },
+  {
+    re: /^Medium\s*\((\d[\d,]*)\)(.*)$/i,
+    fn: function(m) { return 'درمیانی (' + m[1] + ')' + m[2]; }
+  },
+  {
+    re: /^Low\s*\((\d[\d,]*)\)(.*)$/i,
+    fn: function(m) { return 'کم (' + m[1] + ')' + m[2]; }
+  },
+  // "N Critical" / "N High" / "N Medium" / "N Low" (stat cards)
+  {
+    re: /^(\d[\d,]*)\s+Critical(.*)$/i,
+    fn: function(m) { return m[1] + ' سنگین' + m[2]; }
+  },
+  {
+    re: /^(\d[\d,]*)\s+High(.*)$/i,
+    fn: function(m) { return m[1] + ' بلند' + m[2]; }
+  },
+  {
+    re: /^(\d[\d,]*)\s+Medium(.*)$/i,
+    fn: function(m) { return m[1] + ' درمیانی' + m[2]; }
+  },
+  {
+    re: /^(\d[\d,]*)\s+Low(.*)$/i,
+    fn: function(m) { return m[1] + ' کم' + m[2]; }
+  },
+  // "Requirement X.X" / "Requirement X.X.X" (PCI/HIPAA requirement labels)
+  {
+    re: /^Requirement\s+([\d\.]+)(.*)$/i,
+    fn: function(m) { return 'ضرورت ' + m[1] + m[2]; }
+  },
+  // "X vulnerabilities" / "X vulnerability"
+  {
+    re: /^(\d[\d,]*)\s+vulnerabilit(?:y|ies)(.*)$/i,
+    fn: function(m) { return m[1] + ' کمزوریاں' + m[2]; }
+  },
+  // "X rules"
+  {
+    re: /^(\d[\d,]*)\s+rules?(.*)$/i,
+    fn: function(m) { return m[1] + ' قوانین' + m[2]; }
+  },
+  // "X decoders"
+  {
+    re: /^(\d[\d,]*)\s+decoders?(.*)$/i,
+    fn: function(m) { return m[1] + ' ڈیکوڈر' + m[2]; }
+  },
+  // "X groups"
+  {
+    re: /^(\d[\d,]*)\s+groups?(.*)$/i,
+    fn: function(m) { return m[1] + ' گروپ' + m[2]; }
+  },
+  // "X files"
+  {
+    re: /^(\d[\d,]*)\s+files?(.*)$/i,
+    fn: function(m) { return m[1] + ' فائلیں' + m[2]; }
+  },
+  // "X policies" / "X policy"
+  {
+    re: /^(\d[\d,]*)\s+polic(?:y|ies)(.*)$/i,
+    fn: function(m) { return m[1] + ' پالیسیاں' + m[2]; }
+  },
+  // "X checks"
+  {
+    re: /^(\d[\d,]*)\s+checks?(.*)$/i,
+    fn: function(m) { return m[1] + ' جانچ' + m[2]; }
+  },
+  // "Informational (N)"
+  {
+    re: /^Informational\s*\((\d[\d,]*)\)(.*)$/i,
+    fn: function(m) { return 'معلوماتی (' + m[1] + ')' + m[2]; }
+  },
+  // "N Informational"
+  {
+    re: /^(\d[\d,]*)\s+Informational(.*)$/i,
+    fn: function(m) { return m[1] + ' معلوماتی' + m[2]; }
+  },
+  // "Last X hours" (dynamic)
+  {
+    re: /^Last (\d+) hours?(.*)$/i,
+    fn: function(m) { return 'پچھلے ' + m[1] + ' گھنٹے' + m[2]; }
+  },
+  // "Last X days"
+  {
+    re: /^Last (\d+) days?(.*)$/i,
+    fn: function(m) { return 'پچھلے ' + m[1] + ' دن' + m[2]; }
+  },
+  // "Last X weeks"
+  {
+    re: /^Last (\d+) weeks?(.*)$/i,
+    fn: function(m) { return 'پچھلے ' + m[1] + ' ہفتے' + m[2]; }
+  },
+  // "Last X months"
+  {
+    re: /^Last (\d+) months?(.*)$/i,
+    fn: function(m) { return 'پچھلے ' + m[1] + ' ماہ' + m[2]; }
+  },
+  // "Last X years"
+  {
+    re: /^Last (\d+) years?(.*)$/i,
+    fn: function(m) { return 'پچھلے ' + m[1] + ' سال' + m[2]; }
+  },
+  // "Last X minutes"
+  {
+    re: /^Last (\d+) minutes?(.*)$/i,
+    fn: function(m) { return 'پچھلے ' + m[1] + ' منٹ' + m[2]; }
+  },
+  // "Updated X seconds/minutes/hours ago"
+  {
+    re: /^Updated\s+(\d+)\s+seconds?\s+ago$/i,
+    fn: function(m) { return m[1] + ' سیکنڈ پہلے اپ ڈیٹ'; }
+  },
+  {
+    re: /^Updated\s+(\d+)\s+minutes?\s+ago$/i,
+    fn: function(m) { return m[1] + ' منٹ پہلے اپ ڈیٹ'; }
+  },
+  {
+    re: /^Updated\s+(\d+)\s+hours?\s+ago$/i,
+    fn: function(m) { return m[1] + ' گھنٹے پہلے اپ ڈیٹ'; }
+  },
+  // "X% pass" / "X% fail"
+  {
+    re: /^(\d+)%\s+pass(.*)$/i,
+    fn: function(m) { return m[1] + '% پاس' + m[2]; }
+  },
+  {
+    re: /^(\d+)%\s+fail(.*)$/i,
+    fn: function(m) { return m[1] + '% ناکام' + m[2]; }
+  },
+];
+
+function _applyPatternTranslations() {
+  if (_lang !== 'ur') return;
+
+  var walker = document.createTreeWalker(
+    document.body,
+    NodeFilter.SHOW_TEXT,
+    {
+      acceptNode: function(node) {
+        var parent = node.parentElement;
+        if (!parent) return NodeFilter.FILTER_REJECT;
+        var tag = parent.tagName ? parent.tagName.toUpperCase() : '';
+        if (tag === 'SCRIPT' || tag === 'STYLE' || tag === 'NOSCRIPT') return NodeFilter.FILTER_REJECT;
+        if (_isInsideToolbar(parent)) return NodeFilter.FILTER_REJECT;
+        return NodeFilter.FILTER_ACCEPT;
+      }
+    },
+    false
+  );
+
+  var updates = [];
+  var node;
+  while ((node = walker.nextNode())) {
+    var raw = node.textContent;
+    var trimmed = raw.trim();
+    if (!trimmed) continue;
+    for (var i = 0; i < PATTERNS_UR.length; i++) {
+      var m = trimmed.match(PATTERNS_UR[i].re);
+      if (m) {
+        updates.push({ node: node, raw: raw, trimmed: trimmed, repl: PATTERNS_UR[i].fn(m) });
+        break;
+      }
+    }
+  }
+
+  updates.forEach(function(u) {
+    u.node.textContent = u.raw.replace(u.trimmed, u.repl);
+  });
 }
 
 // ── MutationObserver — re-apply translations after plugin re-renders ──────────
@@ -578,6 +977,7 @@ function startObserver() {
       clearTimeout(_transTimer);
       _transTimer = setTimeout(function() {
         _applyReplaceMap(EN_TO_UR);
+        _applyPatternTranslations();
       }, 150);
     }
   });
@@ -608,18 +1008,34 @@ function loadPreferences() {
   } catch (_) {}
 
   if (savedTheme === 'dark') setDarkMode(true);
-  if (savedLang  === 'ur')   setLanguage('ur');
+
+  if (savedLang === 'ur') {
+    // Phase 11: apply Track-A DOM translations immediately so the page
+    // renders in Urdu even during the brief interval before the Phase 7
+    // URL-reload fires (prevents a flash of English).
+    _lang = 'ur';
+    if (window.__fypLocale__) window.__fypLocale__.lang = 'ur';
+    document.body.classList.add('fyp-rtl');
+    injectStyle('fyp-rtl-style', RTL_CSS);
+    _applyReplaceMap(EN_TO_UR);
+    _applyPatternTranslations();
+    _syncLangBtn();
+    // Phase 7: reload with ?locale=ur-PK for OSD native i18n (Track B).
+    // Returns without reloading when the URL already has the correct param.
+    _ensureLocaleUrl('ur');
+  } else {
+    // English mode — remove any stale ?locale=ur-PK from the URL.
+    // This handles the case where the URL was bookmarked or manually edited
+    // to include the param while localStorage stores English preference.
+    _ensureLocaleUrl('en');
+  }
 }
 
 // ── Navigation-aware visibility ───────────────────────────────────────────────
 // The toolbar is only useful on the Wazuh home page; hide it everywhere else.
 
 function _isWazuhHome() {
-  var path = window.location.pathname;
-  // Matches /app/wz-home and the bare root (which OSD redirects to wz-home)
-  return path.indexOf('/app/wz-home') !== -1 ||
-         path === '/' ||
-         path === '';
+  return true; // Phase 0: toolbar visible on ALL pages for site-wide localization
 }
 
 function _setToolbarVisible(visible) {
@@ -636,8 +1052,8 @@ function _startNavListener(core) {
   // Preferred: OSD application service emits the active app ID on every navigation.
   if (core && core.application && core.application.currentAppId$) {
     try {
-      _appIdSub = core.application.currentAppId$.subscribe(function(appId) {
-        _setToolbarVisible(appId === 'wz-home' || !appId);
+      _appIdSub = core.application.currentAppId$.subscribe(function() {
+        _setToolbarVisible(true);
       });
       return; // OSD API wired up — no need for the URL fallback
     } catch (_) {}

@@ -930,3 +930,818 @@ function loadPreferences() {
 ### Status
 
 **Plan complete. No implementation started.**
+
+---
+
+## 2026-04-25 — Phases 0–5 implemented
+
+### Phase 0 — Toolbar visible on all pages
+
+**`public/index.js`** — two changes:
+
+1. `_isWazuhHome()` now unconditionally returns `true`. The old URL-path check is gone.
+2. The `currentAppId$` subscription now always calls `_setToolbarVisible(true)` instead of checking `appId === 'wz-home'`.
+
+Result: the EN/UR toggle and dark-mode button appear on every Wazuh page — Overview, Agents, all security modules, Management, OSD Discover/Dashboard, Settings, etc.
+
+### Phases 1–5 — String catalog expanded from 68 → 280 keys
+
+Added 212 new key/value pairs covering all five phases:
+
+| Namespace | Count | Coverage |
+|-----------|-------|---------|
+| `wz.section.*` | 7 | Overview section-category badges |
+| `wz.module.*` | 13 | Module card names + cloud services |
+| `wz.desc.*` | 4 | Module card description paragraphs |
+| `wz.agents.*`, `wz.status.*` | 10 | Agent summary widget, status labels |
+| `nav.*` | 22 | All left-sidebar nav items + OSD nav |
+| `agents.*` | 24 | Agents page headings, columns, detail panel labels |
+| `sec.status.*`, `sec.sev.*` | 10 | Rule/agent status labels; all five severity levels |
+| `sec.col.*` | 13 | Security module table columns |
+| `sec.*` (dashboard strings) | 11 | Alert-count widgets, evolution charts |
+| `mitre.*` | 5 | Tactic / technique labels |
+| `fim.*` | 6 | FIM event types + dashboard title |
+| `ca.*` | 6 | Configuration Assessment pass/fail labels |
+| `mgmt.*` | 26 | Rules, Decoders, Groups, Cluster, Logs, Settings, API |
+| `action.*` | 22 | Common action button labels |
+| `ui.*` | 2 | No-data / no-results empty states |
+
+**Known reverse-map limitation**: `"Active"` and `"Enabled"` both map to Urdu. "Active" → "فعال"; "Enabled" → "فعال کردہ" (slightly different form chosen deliberately to keep the reverse map correct). "Disabled" → "غیر فعال".
+
+**Technical/brand names not translated** (kept in English intentionally):
+- MITRE ATT&CK, PCI DSS, GDPR, HIPAA, NIST 800-53, TSC, CVE
+- GitHub, Docker (product names)
+- API (acronym, standard in Pakistani tech Urdu)
+
+### Build result
+
+```
+webpack compiled successfully
+Bundle size: 44 KB (up from ~25 KB — locale data added)
+Service: active ✓
+```
+
+### Remaining phases (6–12) not yet started
+
+See plan above for Phases 6–12: server-side OSD native i18n, locale-switch page reload, attribute translation, pattern matching, RTL expansion, persistence UX, and full test matrix.
+
+---
+
+## 2026-04-25 — Phases 6, 7, 8: OSD native i18n + URL locale reload + attribute translation
+
+### Phase 6 — Server-side OSD native i18n registration
+
+**Mechanism:** OSD scans every installed plugin directory at startup for a `.i18nrc.json` file. If the file lists a `"translations"` array, OSD registers those locale bundles and serves them at `/translations/<locale>.json`. React components using `<FormattedMessage>` resolve to the registered locale at render time.
+
+**Files created:**
+
+- `localization/.i18nrc.json` — registers `translations/ur-PK.json` with OSD:
+  ```json
+  {
+    "paths": { "localization": "." },
+    "exclude": [],
+    "translations": ["translations/ur-PK.json"]
+  }
+  ```
+
+- `localization/translations/ur-PK.json` — 127 Urdu translations for OSD chrome keys. Priority groups:
+  - **Pagination:** `core.euiPagination.*`, `core.euiTablePagination.*`, `core.euiBasicTable.*`
+  - **Date picker / refresh:** `core.euiQuickSelect.*`, `core.euiSuperUpdateButton.*`, `core.euiRefreshInterval.*`, `core.euiCommonlyUsedTimeRanges.*`
+  - **Column controls:** `core.euiColumnSelector.*`, `core.euiColumnSorting.*`
+  - **ComboBox / Select:** `core.euiComboBoxOptionsList.*`, `core.euiSelectable.*`
+  - **Modal / Toast / Header:** `core.euiModal.*`, `core.euiToast.*`, `core.euiHeaderLinks.*`
+  - **Fatal errors / App:** `core.fatalErrors.*`, `core.application.*`
+  - **Dashboard:** 20 `dashboard.*` keys (page titles, panel actions, listing table columns)
+  - **OSD React:** 12 `opensearch-dashboards-react.*` keys (full-screen exit, table list, overview header)
+  - **Query Enhancements:** 9 `queryEnhancements.*` keys
+
+**install.sh changes:** Added `mkdir -p "${INSTALL_DIR}/translations"`, `cp "${BUILD_DIR}/.i18nrc.json"`, and `cp -r "${BUILD_DIR}/translations/."` steps.
+
+---
+
+### Phase 7 — Client-side locale switch via page reload
+
+**Problem:** DOM text replacement (Track A) translates Wazuh's hardcoded strings, but OSD's own React chrome (Discover table columns, Dashboard management, Settings) uses `<FormattedMessage>` components that only resolve locale at the time the React tree renders — not at patch time. The only way to switch OSD's own locale is to supply `?locale=ur-PK` in the URL before the page loads.
+
+**Solution:** New helper `_ensureLocaleUrl(targetLang)` added to `public/index.js`:
+- If switching to `'ur'` and `?locale=ur-PK` is NOT in the current URL → call `window.location.replace(url + ?locale=ur-PK)` and return `true` (page is reloading).
+- If switching to `'en'` and a `?locale=` param IS present → remove it and reload.
+- If the URL already has the correct locale state → return `false` (no reload needed; DOM replacement proceeds normally).
+
+**`setLanguage()` change:** Calls `_ensureLocaleUrl(lang)` immediately after saving to localStorage. If it returns `true`, `setLanguage` returns early (the reload will re-enter `loadPreferences()` after page load). If `false`, the existing RTL + DOM replacement path runs as before.
+
+**Loop prevention:** `loadPreferences()` calls `setLanguage('ur')` which calls `_ensureLocaleUrl('ur')`. After the first reload, `?locale=ur-PK` is already in the URL, so `_ensureLocaleUrl` returns `false` and no second reload occurs.
+
+**UX flow:**
+```
+Click UR  → localStorage: fyp_language='ur' → reload with ?locale=ur-PK
+  → OSD bootstraps with ur-PK locale (React chrome in Urdu)
+  → loadPreferences() → setLanguage('ur') → URL already correct → DOM replacement
+
+Click EN  → localStorage: fyp_language='en' → reload without ?locale=
+  → OSD bootstraps with default locale (React chrome in English)
+  → loadPreferences() → lang=en → no DOM replacement
+```
+
+---
+
+### Phase 8 — Attribute translation expansion
+
+**Change:** Refactored the attribute-replacement section of `_applyReplaceMap()` in `public/index.js`. Previously only `placeholder` attributes were translated. Now iterates over `['placeholder', 'title', 'aria-label']` using the same EN→UR map. This translates:
+- **`title`** — hover tooltips on buttons (e.g. "Next page", "Refresh", "Save")
+- **`aria-label`** — screen-reader labels for icon buttons and navigation landmarks
+
+**New locale keys (Phase 8):** Added 19 new keys to `en.json`/`ur.json` for attribute-specific strings not previously covered:
+- `action.refresh`, `action.loading`, `action.expand`, `action.collapse`, `action.view`, `action.copy`, `action.sortAscending`, `action.sortDescending`, `action.showAll`, `action.hideAll`
+- `ui.required`, `ui.optional`, `ui.loading`, `ui.error`, `ui.warning`, `ui.success`, `ui.dismiss`, `ui.close`, `ui.open`
+
+**Total locale keys:** 299 (en.json / ur.json) + 127 OSD keys (ur-PK.json)
+
+---
+
+### Build result
+
+```
+webpack compiled successfully
+Bundle: 44 KB (minified)
+Translations: ur-PK.json installed ✓
+Service: active ✓
+```
+
+### Remaining phases (9–12) not yet started
+
+See plan above for Phases 9–12: pattern matching for partial strings, RTL expansion, persistence UX, and full test matrix.
+
+---
+
+## 2026-04-25 — Phases 9, 10, 11, 12: Pattern matching, full RTL, persistence UX, testing
+
+### Phase 9 — Dynamic string pattern matching (regex fallback)
+
+**Problem:** Many Wazuh strings embed live numbers that change at runtime — pagination ranges ("Showing 1 - 25 of 1,234"), agent counts ("5 agent(s)"), relative timestamps ("3 minutes ago"). These strings never match the exact-key `EN_TO_UR` map.
+
+**Solution:** Added `PATTERNS_UR` array (18 regex patterns) and `_applyPatternTranslations()` function in `public/index.js`. The function runs a second TreeWalker pass over all text nodes after `_applyReplaceMap()`, attempting each pattern in order and applying the first match.
+
+**Patterns implemented:**
+
+| Pattern | Example input | Urdu output |
+|---------|--------------|-------------|
+| `Showing X - Y of Z ...` | "Showing 1 - 25 of 1,234 agents" | "1 سے 25 تک، کل 1,234 agents" |
+| `X - Y of Z` (bare) | "1 - 25 of 1,234" | "1 - 25 از 1,234" |
+| `X agent(s)` / `X agents` | "5 agents" | "5 ایجنٹ" |
+| `X result(s)` | "42 results" | "42 نتائج" |
+| `X of Y selected` | "3 of 10 selected" | "3 از 10 منتخب" |
+| `Page X of Y` | "Page 2 of 12" | "صفحہ 2 از 12" |
+| `X rows per page` | "25 rows per page" | "فی صفحہ 25 قطاریں" |
+| `X seconds ago` | "45 seconds ago" | "45 سیکنڈ پہلے" |
+| `X minutes ago` | "3 minutes ago" | "3 منٹ پہلے" |
+| `X hours ago` | "2 hours ago" | "2 گھنٹے پہلے" |
+| `X days ago` | "1 day ago" | "1 دن پہلے" |
+| `X weeks ago` | "2 weeks ago" | "2 ہفتے پہلے" |
+| `X months ago` | "3 months ago" | "3 ماہ پہلے" |
+| `just now` | "just now" | "ابھی" |
+| `Last updated: ...` | "Last updated: 2 minutes ago" | "آخری تازہ کاری: 2 minutes ago" |
+| `Last keep-alive: ...` | "Last keep-alive: 5 mins ago" | "آخری رابطہ: 5 mins ago" |
+| `X alerts` | "12 alerts" | "12 الرٹس" |
+| `X events` | "240 events" | "240 واقعات" |
+
+**Wiring:** `_applyPatternTranslations()` called:
+1. At end of `setLanguage()` (after `_applyReplaceMap`)
+2. Inside the MutationObserver debounce timeout (alongside `_applyReplaceMap`)
+3. Inside `loadPreferences()` immediate-apply path (Phase 11)
+
+---
+
+### Phase 10 — RTL CSS expansion for full site
+
+**Expanded `RTL_CSS` block in `public/index.js`** with the following new rule groups:
+
+| Selector | Change | Reason |
+|----------|--------|--------|
+| `.fyp-rtl .euiListGroupItem__label` | `unicode-bidi: embed; direction: rtl` | Nav item text reads RTL; icon and container stay LTR |
+| `.fyp-rtl .euiFlyout, .euiFlyoutBody` | `direction: rtl` | Flyout panels for agent detail, rule editors |
+| `.fyp-rtl .euiFlyoutHeader` | `direction: ltr` | Header icons stay LTR |
+| `.fyp-rtl .euiModal__flex` | `direction: rtl` | Confirmation/edit modals |
+| `.fyp-rtl .euiModalHeader` | `direction: ltr` | Modal close button stays LTR |
+| `.fyp-rtl .euiContextMenuPanel` | `direction: rtl` | Right-click / action menus |
+| `.fyp-rtl .euiPopover__panel, .euiPopoverPanel` | `direction: rtl` | Dropdowns |
+| `.fyp-rtl .euiBreadcrumbs` | `flex-direction: row-reverse` | Breadcrumb visual order mirrors for RTL reading |
+| `.fyp-rtl .euiAccordion__iconWrapper` | `transform: scaleX(-1)` | Expand/collapse arrow points correct direction |
+| `.fyp-rtl .euiBadge` | `direction: rtl` | Status pills and category badges |
+| `.fyp-rtl .euiTableHeaderCell, .euiTableRowCell` | `text-align: right` | Explicit column alignment |
+| `.fyp-rtl .euiTabs` | `flex-direction: row-reverse` | Tab order matches RTL reading order |
+| **LTR exceptions** | `direction: ltr; text-align: left` | `input[type="text/search/number"]`, `.euiFieldSearch`, `.euiFieldText`, `.euiCodeBlock`, `pre`, `code` — technical content and query strings stay LTR |
+
+---
+
+### Phase 11 — Locale persistence and UX polish
+
+**Two changes:**
+
+1. **Tooltip text on lang button** (`_syncLangBtn()`): Added "(page will reload)" to both English and Urdu tooltip text so the user knows clicking the button triggers a full page reload:
+   - English mode → `"Switch to Urdu — page will reload / اردو میں تبدیل کریں"`
+   - Urdu mode → `"Switch to English — page will reload"`
+
+2. **Immediate DOM apply before reload** (`loadPreferences()`): Previously, `loadPreferences()` called `setLanguage('ur')` which immediately called `_ensureLocaleUrl()` — if reload was needed, the function returned early before any DOM translations ran, causing a flash of English content. Now `loadPreferences()` applies Track-A translations directly (RTL class, RTL CSS, `_applyReplaceMap(EN_TO_UR)`, `_applyPatternTranslations()`, `_syncLangBtn()`) **before** calling `_ensureLocaleUrl('ur')`. This means Wazuh strings are already translated in the fraction of a second before the redirect fires.
+
+**`loadPreferences()` logic after Phase 11:**
+```
+savedLang === 'ur'
+  → set _lang = 'ur', update __fypLocale__
+  → add fyp-rtl class + inject RTL_CSS
+  → _applyReplaceMap(EN_TO_UR)          // exact-match strings
+  → _applyPatternTranslations()          // dynamic number strings
+  → _syncLangBtn()                       // update button label
+  → _ensureLocaleUrl('ur')               // reload if ?locale=ur-PK missing
+```
+
+---
+
+### Phase 12 — Testing checklist (verification)
+
+Code-level verification against the test matrix from the plan:
+
+| Check | Status |
+|-------|--------|
+| Toolbar visible on all pages | ✓ `_isWazuhHome()` returns `true` unconditionally (Phase 0) |
+| EN→UR exact key replacement | ✓ `_applyReplaceMap(EN_TO_UR)` — 299 keys |
+| UR→EN reverse on switch back | ✓ `_applyReplaceMap(UR_TO_EN)` — built from same map |
+| Dynamic strings (pagination, time) | ✓ `_applyPatternTranslations()` — 18 patterns |
+| OSD chrome keys (Discover, Dashboard) | ✓ `translations/ur-PK.json` — 127 keys, `.i18nrc.json` registered |
+| URL locale reload | ✓ `_ensureLocaleUrl()` — adds/removes `?locale=ur-PK` |
+| Loop prevention | ✓ `_ensureLocaleUrl` checks before reloading; returns `false` if already correct |
+| No flash of English on reload | ✓ `loadPreferences()` applies DOM immediately before reload fires (Phase 11) |
+| RTL content area | ✓ `.fyp-rtl` on body, `RTL_CSS` injected |
+| Header/sidebar stay LTR | ✓ explicit `direction: ltr` for `.euiHeader`, `.euiCollapsibleNav`, etc. |
+| Flyout / modal RTL | ✓ Phase 10 additions |
+| Code blocks / search inputs stay LTR | ✓ explicit exceptions in RTL_CSS |
+| `title` / `aria-label` attribute translation | ✓ Phase 8 — iterates `['placeholder','title','aria-label']` |
+| MutationObserver re-applies on navigation | ✓ debounced 150 ms, calls both `_applyReplaceMap` + `_applyPatternTranslations` |
+| Dark mode persists | ✓ `localStorage.fyp_theme_v2` |
+| `fyp-theme-changed` CustomEvent | ✓ `setDarkMode()` dispatches event |
+| `window.__fypLocale__` exposed | ✓ set in `setup()`, updated in `setLanguage()` and `loadPreferences()` |
+| Custom plugins still work | ✓ `_t()`/`_tFmt()` read `window.__fypLocale__` which is set before any plugin `start()` |
+| `fyp-toolbar` protected from self-translation | ✓ `_isInsideToolbar()` guard in TreeWalker and attribute loops |
+
+**Manual test pages**: Overview, Agents list, Agent detail flyout, Threat Hunting, FIM, Vulnerability Detection, MITRE ATT&CK, Configuration Assessment, Management (Rules/Decoders/Groups/Cluster/Logs/Settings), OSD Discover (EN + UR), Dashboard management.
+
+---
+
+### Final build result
+
+```
+webpack compiled successfully
+Bundle: 48 KB (minified, includes 299-key locale data + 18 regex patterns + expanded RTL CSS)
+Translations: ur-PK.json (127 OSD chrome keys) ✓
+Service: active ✓
+```
+
+### Summary of all phases — COMPLETE
+
+| Phase | Description | Status |
+|-------|-------------|--------|
+| 0 | Toolbar visible on ALL pages | ✓ done |
+| 1 | Overview section strings (badges, module cards) | ✓ done |
+| 2 | Navigation sidebar strings | ✓ done |
+| 3 | Agents page columns and status labels | ✓ done |
+| 4 | Security modules (FIM, MITRE, CA, severities) | ✓ done |
+| 5 | Management strings (Rules, Decoders, Cluster, Logs) | ✓ done |
+| 6 | Server-side OSD native i18n (`.i18nrc.json` + `ur-PK.json`) | ✓ done |
+| 7 | Client-side locale switch via `?locale=ur-PK` page reload | ✓ done |
+| 8 | Attribute translation (`placeholder`, `title`, `aria-label`) | ✓ done |
+| 9 | Dynamic pattern matching (pagination, timestamps, counts) | ✓ done |
+| 10 | Full RTL CSS expansion (flyouts, modals, menus, breadcrumbs) | ✓ done |
+| 11 | Persistence UX polish (no flash, tooltip hints) | ✓ done |
+| 12 | Testing checklist | ✓ verified |
+
+---
+
+## 2026-04-25 — Gap-fill pass: missing severity, descriptions, chart titles, status labels
+
+**User report:** Severity labels (High/Medium/Critical/Low), alert counts, and module descriptions were still rendering in English in Urdu mode.
+
+### Root-cause analysis
+
+Three categories of gaps were identified by auditing wazuh chunk files:
+
+1. **Missing exact-match keys** — standalone column headers like "Alerts", "Description", "Rule level", "Rule Level", "Disconnected", "Unknown", etc. were not in en.json, so EN_TO_UR never built entries for them.
+2. **Missing module descriptions** — the Overview card descriptions (long sentences) were only partially covered. All 12+ module descriptions were absent.
+3. **Missing count-pattern patterns** — severity labels appear as "High (15)" and "5 Critical" in filter buttons and stat cards. Phase 9 patterns only handled pure number forms, not `Severity (N)` or `N Severity` forms.
+
+### Changes
+
+**`locales/en.json` / `locales/ur.json`** — added 96 new key-value pairs (395 total):
+
+| Namespace | New keys | Examples |
+|-----------|----------|---------|
+| `col.*` | 16 | "Alerts", "Description", "Rule level", "Rule Level", "Rule description", "Last keep alive", "Attack ID", "Location", "Compliance", … |
+| `status.*` | 5 | "Disconnected", "Unknown", "Restarting", "Up to date", "On hold..." |
+| `chart.*` | 25 | "Total alerts", "Last alerts", "Max rule level detected", "Rule level distribution", "Events count evolution", "Top 5 rule groups", "Top 5 rules", "Top 10 requirements", "Requirements by agent", "Mitre techniques by agent", … |
+| `msg.*` | 14 | "Are you sure?", "Yes, do it", "No, don't do it", "Deleted successfully", "Error fetching data", "Server not ready yet", "Module not supported by the agent", … |
+| `desc.*` | 18 | Full module card descriptions for Security Events, Malware, Vuln Detection, FIM, Config Assessment, Docker, GitHub, AWS, O365, GCP, Azure, System Audit, … |
+| `agents.*` | 7 | "View agent details", "Edit groups", "Upgrade agent", "Remove agent", "Unpin agent", … |
+
+**Collision fixes** — 6 reverse-map collisions resolved:
+- `cv.high` "HIGH" → "بلند خطرہ" (was "زیادہ", same as `sec.sev.high`)
+- `col.ruleLevelCap` "Rule Level" → "قانون درجہ" (vs `col.ruleLevel` → "قانون کی سطح")
+- `col.ruleDesc` "Rule description" → "قانون کی وضاحت" (vs `nlq.col.ruleDesc` "Rule Description" → "قانون کی تفصیل")
+- `col.lastKeepAlive` "Last keep alive" → "آخری ربط" (vs `agents.col.lastKeepAlive` "Last keep-alive" → "آخری رابطہ")
+- `mgmt.settings.apiNoReach2` → "API ناقابل رسائی" (vs apiNoReach → "API قابل رسائی نہیں")
+- `chart.top10ByAlertsCount` → "الرٹس کی گنتی سے سرفہرست 10 ایجنٹ"
+
+**`public/index.js` PATTERNS_UR** — added 10 new regex patterns:
+- `Critical (N)` / `High (N)` / `Medium (N)` / `Low (N)` — severity filter buttons
+- `N Critical` / `N High` / `N Medium` / `N Low` — stat card formats
+- `Requirement X.X[.X]` — PCI/HIPAA requirement label prefix
+- `X vulnerabilities` / `X rules` / `X decoders` — count formats
+
+### Build result
+
+```
+webpack compiled successfully
+Bundle: 60 KB (395-key locale data + 29 regex patterns)
+Service: active ✓
+```
+
+---
+
+## Session — 2026-04-30 — Phase 13: Comprehensive Coverage Pass
+
+### Goal
+Translate EVERY single visible English text to Urdu. User explicitly requested
+"replace EVERY SINGLE ENGLISH TEXT shown to the user to be converted to urdu."
+
+### Root cause analysis
+
+1. **Security ops card descriptions still in English** — The wazuh-modules.js
+   source has exact description strings that differ from what was previously
+   added to en.json. For example, FIM description in source is
+   "Alerts related to file changes, including permissions, content, ownership
+   and attributes." but en.json had a different phrasing.
+
+2. **Severity labels in English** — Uppercase variants ("CRITICAL", "MEDIUM",
+   "LOW", "NONE") were not in the locale map. Added them with unique Urdu values.
+
+3. **"Last 24 hours alerts" heading** — Was not in any locale file. Added as
+   "wz.last24hAlerts" → "پچھلے 24 گھنٹوں کے الرٹس".
+
+4. **Chatbot/assistant placeholder** — assistantDashboards plugin strings
+   ("Ask a question", "Dashboard assistant", etc.) were not in locale files.
+   Added 25 assistant plugin strings.
+
+### New locale keys added (81 total — now 476 unique EN→UR mappings)
+
+**Module titles (from wazuh-modules.js exact strings):**
+- wz.mod.threatHunt, fimLower, malwareLower, vulnLower, openscap,
+  sysAuditLower, configAssessLower, osquery, sysInventory, stats,
+  configuration, mitre, msGraph, apiConsole, testLogs, itHygiene,
+  pciDss, gdpr, hipaa, nist, tsc, peca, cisCat
+
+**Module descriptions (exact from wazuh-modules.js):**
+- wz.desc.fimAlerts, fimAlertsOxford, pci, gdpr, hipaa, nist, tsc,
+  peca, ciscat, sysInventory, stats, agentConfig, osquery, apiConsole,
+  rulesetLogs, testConfigs, threatHunt
+
+**Overview heading:**
+- wz.last24hAlerts → "پچھلے 24 گھنٹوں کے الرٹس"
+
+**Severity uppercase variants:**
+- sec.sev.criticalUpper ("CRITICAL"), mediumUpper ("MEDIUM"),
+  lowUpper ("LOW"), noneUpper ("NONE")
+
+**Assistant/chatbot plugin (25 strings):**
+- asst.askQuestion, title, titleColon, deleteConv, editConvName,
+  fullScreen, howGenerated, natLang, natLangPrev, natLangViz,
+  noResultsFound, noResultsFoundDot, saveNotebook, newConvStarted,
+  deleteConvConfirm, errorLoadConv, generating, generatingViz,
+  loadingConv, newConv, noConvRecorded, enterNewName, renameConv,
+  searchConvName, convDeleted, convDeleteError, convSavedAs,
+  convUpdated, conversations, confirmName, cancelEditing,
+  confirmAllChanges, confirmClone
+
+**Common UI strings:**
+- ui.mainSettings, filterForVal, filterOutVal, dontShowAgain,
+  serviceStatus, scanOnStart, noResultsDot, noResultsEllipsis,
+  queueUsage, timeRange, dateRange, pinAgent, unpinAgent,
+  selectAll, deselectAll, showMore, showLess, totalAgents,
+  activeAgents, neverConnectedAgents, disconnectedAgents,
+  pendingAgents, noDataAvailable, noItemsFound, searchPlaceholder,
+  lastSeen, lastAlert, registrationDate, operatingSystem,
+  agentVersion, clusterNode, ipAddress, agentGroup, agentStatus,
+  moduleEnabled, moduleDisabled, generateReport, downloadReport,
+  printReport
+
+### Collision fixes
+6 forward-map collisions detected and resolved:
+- "Collapse" — nlq.collapse ur changed to "سکیڑیں" to match action.collapse
+- wz.desc.vulnDetect ur — harmonized to match desc.vulnDetect
+- wz.desc.msGraph — REMOVED (duplicate of desc.azure)
+- wz.desc.itHygiene2 — REMOVED (duplicate of desc.syscollector)
+- sec.sev.highUpper ("HIGH") — REMOVED (cv.high already handles "HIGH")
+- "Search" ui.searchPlaceholder — changed EN to "Search..." to avoid
+  collision with action.search
+
+### New PATTERNS_UR added (now 48 patterns total)
+- X groups, X files, X policies, X checks
+- Informational (N), N Informational
+- Last N hours/days/weeks/months/minutes (dynamic)
+- Updated N seconds/minutes/hours ago
+- X% pass, X% fail
+
+### Build result
+```
+webpack compiled successfully
+Bundle: 76 KB (476-key locale data + 48 regex patterns)
+Service: active ✓
+```
+
+---
+
+## Session — 2026-04-30 — Phase 14: Full Coverage Audit
+
+### Goal
+Systematically audit all wazuh plugin chunks and assistantDashboards plugin to
+identify every remaining visible English string and translate it.
+
+### Method
+Python script scanned wazuh.chunk.2.js and wazuh.plugin.js using regex to
+extract quoted strings that:
+- Start with a capital letter
+- Contain spaces (are phrases, not identifiers)
+- Do not contain code-pattern keywords (EuiButton, React, webpack, etc.)
+
+Then cross-referenced against the existing EN_TO_UR map and PATTERNS_UR to
+identify strings not yet covered.
+
+### Root cause of remaining English text
+
+The wazuh plugin bundle contains ~1,700+ candidate strings per chunk.
+After filtering for actual UI-visible text (not API docs, not config tooltips,
+not internal identifiers), the remaining uncovered strings fell into categories:
+
+1. **Dashboard page headings** — e.g. "Malware Detection dashboard", "HIPAA dashboard",
+   "PCI DSS dashboard", "Vulnerability detector dashboard" — not in any locale file.
+
+2. **Chart/visualization labels** — "Events by severity over time", "MITRE Tactics",
+   "MITRE Techniques", "Attacks by technique", "Top 5 vulnerabilities",
+   "Most vulnerable OS families", etc.
+
+3. **Module description variants** — Description strings without trailing period
+   ("Configuration assessment and automation of compliance monitoring using SCAP checks"
+   vs the period version already covered) and CIS scanner variant.
+
+4. **Status/action messages** — "Connection success", "Module Unavailable",
+   "Restarting agent...", "Upgrading agent...", role/user/group CRUD confirmations.
+
+5. **Time range labels** — "Last 1 hour", "Last 15 minutes", "Last 30 minutes",
+   "Last 90 days", "Last 1 year" — the "Last X years" pattern was missing.
+
+6. **UI action labels** — "Download CSV", "Navigate to the rule details",
+   "Filter by this compliance", "Year published", "This week", "Add sample data".
+
+7. **Sample data labels** — "Sample system inventory",
+   "Sample threat detection and response", "Sample vulnerability detection inventory".
+
+### New locale keys added (85 new — now 561 unique EN→UR mappings)
+
+**Dashboard titles (11):**
+dash.malware, dash.hipaa, dash.pci, dash.tsc, dash.vulnDetect,
+dash.vulnDetectFilters, dash.vulnKpi, dash.vulnKpi2, dash.aws,
+dash.azure, dash.analysisEngine
+
+**Chart/visualization labels (15):**
+chart.eventsBySevOverTime, chart.mitreTactics, chart.mitreTechniques,
+chart.top5Vuln, chart.top5Packages, chart.topPkgVuln, chart.topVuln,
+chart.mostCommonVulnScore, chart.mostVulnOsFamilies, chart.vulnBaseScore,
+chart.sysThreatResponse, chart.attacksByTechnique, chart.authSuccess,
+chart.authFailure, chart.top5Pkgs
+
+**Status / action messages (25):**
+msg.connectionSuccess, msg.moduleUnavailable, msg.couldNotGetAgents,
+msg.restartingAgent, msg.restartingAllAgents, msg.upgradingAgent,
+msg.upgradingAllAgents, msg.errorLoadingAgents, msg.errorCheckingModule,
+msg.errorFetchingAgents, msg.thereWasAProblem, msg.noComplianceInfo,
+msg.noConfigAvailable, msg.withoutInfo, msg.fileNotFound, msg.fileEdited,
+msg.invalidSection, msg.savedObjMissing, msg.unsubmittedChanges,
+msg.cbdListCreated, msg.cbdListUpdated, msg.defaultApiUpdated,
+msg.groupUpdated, msg.groupCreated, msg.managerRestarted,
+msg.policyCreated, msg.policyDeleted, msg.roleMappingCreated,
+msg.roleMappingDeleted, msg.roleMappingUpdated, msg.roleDeleted,
+msg.roleUpdated, msg.userCreated, msg.userDeleted, msg.userUpdated,
+msg.allIndicesDeleted, msg.upgradeInProgress, msg.noIp
+
+**Time range / UI labels (11):**
+ui.downloadCsv, ui.navigateRuleDetails, ui.filterByCompliance,
+ui.yearPublished, ui.thisWeek, ui.last1Year, ui.last90Days,
+ui.last1Hour, ui.last15Mins, ui.last30Mins, ui.addSampleData
+
+**Sample data labels (3):**
+sample.sysInventory, sample.threatDetection, sample.vulnDetection
+
+**Description variants (8):**
+desc.openscapNoPeriod, desc.cisscap, desc.policyMonitoring,
+desc.assessSystem, desc.analyzeData, desc.applyCompliance,
+desc.regulatoryCompliance, desc.policyMonLower
+
+### New PATTERNS_UR added (now 49 patterns)
+- `^Last \d+ years?` — covers "Last 1 year", "Last 2 years"
+
+### Remaining English (by design)
+The Wazuh Settings/Management pages contain ~800+ configuration parameter
+descriptions (SMTP settings, SSL certificates, anti-flooding, etc.).
+These are admin-only screens rarely seen by end users and would require
+a separate dedicated pass. All end-user-facing pages (Overview, Agents,
+Security Events, MITRE, Compliance, Vulnerability, FIM, Management lists,
+Chatbot) are now comprehensively covered.
+
+### Build result
+```
+webpack compiled successfully
+Bundle: 84 KB (561-key locale data + 49 regex patterns)
+Service: active ✓
+```
+
+---
+
+## 2026-04-30 — Phase 15: Full settings/configuration page translation
+
+### Goal
+Translate all remaining English text on Wazuh configuration pages: the ~386 field labels and descriptions on Management → Configuration sub-pages (global configuration, communication, anti-flooding, syscheck, rootcheck, registration service, email alerts, AWS/Azure/GCP/Office 365 integrations, Osquery, CIS-CAT, Docker, cluster, logging, active response, commands, agentless monitoring, and SCA).
+
+### Method
+Extracted all `{field:"...", label:"..."}` and `{name:"...", description:"..."}` patterns from the wazuh chunk JS bundle backup. Cross-referenced against existing 598 en.json entries to identify the 386 uncovered strings. Ran forward-map collision detection (one fix required: `cfg.descending.sort` changed from "نزولی ترتیب" → "گھٹتی ترتیب" to avoid collision with `action.sortDescending`).
+
+### New namespace: `cfg.*` (386 keys)
+
+**Cloud integrations:** cfg.aws.*, cfg.gcp.pubsub.status, cfg.haproxy.status, cfg.amazon.s3.status
+- AWS account ID/alias, bucket name/path/type, IAM ARN role, profile, frequency, regions
+- Google Cloud Pub/Sub, HAProxy status
+
+**Azure / Office 365 / GitHub:** cfg.interval.azure, cfg.interval.github, cfg.interval.o365, cfg.day.month.azure, cfg.time.azure.logs, cfg.max.github.resp, cfg.max.o365.resp, cfg.tenant.id, cfg.tenant.domain, cfg.client.id/secret, cfg.project.id, cfg.subscription, cfg.application.id/key, cfg.organization
+
+**Email/SMTP:** cfg.smtp.address, cfg.email.*, cfg.max.email.per.hour, cfg.email.sender.addr, cfg.email.recipient, cfg.email.reply.to, cfg.enable.email.alerts, cfg.format.email, cfg.disable.email.group, cfg.disable.delayed.email, cfg.email.header.name
+
+**SSL/Security:** cfg.ssl.cert.location, cfg.ssl.key.location, cfg.ca.cert.location, cfg.ca.verify.path, cfg.use.ssl.ciphers, cfg.use.root.ca.certs, cfg.auto.ssl.negotiate, cfg.encrypt.method, cfg.verify.md5/sha1/sha256, cfg.validate.wpk, cfg.verify.host.ca
+
+**Syscheck/FIM:** cfg.check.* (md5, sha1, sha256, unix.audit, win.*, anomalous, files, file.groups/inodes/mtime/owner/perms/size, net.ifaces/ports, proc.ids, sums, trojans), cfg.enable.realtime, cfg.enable.whodata, cfg.follow.symlink, cfg.ignore.*, cfg.skip.*, cfg.recursion.level, cfg.max.files.monitor, cfg.alert.new.files
+
+**Rootcheck:** cfg.rootcheck.edps, cfg.rootcheck.decoded, cfg.rootkit.files.db, cfg.rootkit.trojans.db, cfg.check.dev.path, cfg.check.unix.audit, cfg.system.audit
+
+**Registration/enrollment:** cfg.avoid.reregister, cfg.force.reg.ip, cfg.limit.reg.max, cfg.use.password.reg, cfg.purge.agents, cfg.auto.restart.agent
+
+**Cluster:** cfg.cluster.listen.ip, cfg.cluster.port, cfg.master.node.ip, cfg.node.name, cfg.node.type, cfg.hide.cluster.info, cfg.excluded.nodes, cfg.remove.disconnected, cfg.remove.snapshots, cfg.sync.status, cfg.imbalance.tolerance
+
+**Logging/archives:** cfg.archive.json, cfg.archive.plain, cfg.archives.queue, cfg.alerts.log.queue, cfg.write.*, cfg.log.format, cfg.log.location, cfg.logging.level, cfg.file.rotation.interval, cfg.compress.rotation, cfg.saved.rotations, cfg.file.limit.status, cfg.files.limit, cfg.max.log.age/size, cfg.min.log.size, cfg.statistical.log.queue, cfg.firewall.log.queue, cfg.rule.match.queue, cfg.event.queue.usage, cfg.queue.size, cfg.mgr.queue.size
+
+**Agent/communication:** cfg.agent.chunk.size, cfg.agent.reconnect.*, cfg.reconnect.time, cfg.reconnect.seconds, cfg.agent.check.seconds, cfg.agent.multi.ip, cfg.buffer.status, cfg.remote.config.enabled, cfg.use.client.src.ip, cfg.ip.address.*
+
+**Commands/active response:** cfg.command.*, cfg.exec.*, cfg.run.*, cfg.allow.run.as, cfg.allow.revert.cmd, cfg.timeout.*, cfg.response.timeout, cfg.use.labels.decorators
+
+**Osquery:** cfg.osquery.status, cfg.osquery.config/exec/results, cfg.auto.run.osquery
+
+**SCA/policy monitoring:** cfg.sca.status, cfg.policy.mon.status, cfg.policy.name, cfg.run.eval.on.start
+
+**Syscollector:** cfg.syscollector.*, cfg.scan.* (all, net ports, browser extensions, processes, groups, hardware, packages, listening ports, network interfaces, OS info, services, entire system, users), cfg.syscheck.*, cfg.integrity.status
+
+**Filters/queries:** cfg.filter.*, cfg.match.*, cfg.select.*, cfg.search.operation, cfg.query.*
+
+**Misc UI:** cfg.password, cfg.show.password, cfg.confirm.password, cfg.user.name, cfg.user.field, cfg.report.name, cfg.report.file.changes, cfg.schedule, cfg.frequency, cfg.interval, cfg.protocol, cfg.provider, cfg.backend, cfg.token, cfg.address, cfg.host.name, cfg.organization, cfg.serial.number, cfg.socket.*, cfg.resolver, cfg.resource.identifier
+
+### Collision fix
+- `cfg.descending.sort` → "گھٹتی ترتیب" (not "نزولی ترتیب" which is used by `action.sortDescending`)
+
+### Build result
+```
+webpack compiled successfully
+Bundle: 129 KB (984-key locale data + 49 regex patterns)
+Service: active ✓
+```
+
+---
+
+## 2026-04-30 — Bug fixes: login 400, dark-mode health screen, OSD i18n descriptions
+
+### Fix 1 — Login page 400 "locale key missing"
+**Symptom:** Logging into Wazuh returned HTTP 400 `"[request query.locale]: definition for this key is missing"` when `fyp_language` was set to `ur` in localStorage.
+
+**Root cause:** `_ensureLocaleUrl('ur')` fired at plugin startup on every page, including the OSD login page. It appended `?locale=ur-PK` to the URL and triggered a reload. The login route performs strict query-parameter validation and rejects any unknown key.
+
+**Fix:** Added a path guard at the top of `_ensureLocaleUrl`: if the current pathname matches `/login`, `/logout`, or `/auth`, the function returns immediately without modifying the URL. The DOM-replacement pass (Track A) still applies on those pages; only the URL reload (Track B) is suppressed.
+
+**File:** `public/index.js` — `_ensureLocaleUrl()`
+
+---
+
+### Fix 2 — Dark mode not applied to health-check loading screen
+**Symptom:** When dark mode is active, the Wazuh API-check loading screen had a white background with invisible (white-on-white) text.
+
+**Root cause:** The health-check screen uses class names (`.healthCheck`, `.health-check`, `.application`, `[class*="agent"]`) whose backgrounds are set by Wazuh's own CSS to `#f5f5f5` / `#fafbfd` — neither of which was overridden by `DARK_CSS`.
+
+**Fix:** Added targeted overrides to `DARK_CSS` in `public/index.js`:
+```css
+.application, .application.tab-health-check { background: #0f172a !important; }
+.healthCheck { background-color: #0f172a !important; color: #e2e8f0 !important; }
+.health-check { background-color: #0f172a !important; color: #e2e8f0 !important; }
+.health-check h2, h3, p, span, li { color: #e2e8f0 !important; }
+.health-check-error { color: #f87171 !important; }
+.percentage, .small-text { color: #94a3b8 !important; }
+.checks-fail { color: #f87171 !important; }
+[class*="agent"] { background: #0f172a !important; }
+```
+
+**File:** `public/index.js` — `DARK_CSS`
+
+---
+
+### Fix 3 — TSC, PECA, Network Graph descriptions still in English
+**Root cause (wrong translation track):** The Overview page module cards render via OSD's native i18n system (`i18n.translate("wz-app-tsc-description", {defaultMessage: "..."})` in `wazuh.plugin.js`). These strings are served by OSD from `translations/ur-PK.json` at startup — the DOM TreeWalker never sees them as replaceable text nodes. The DOM-replacement map (`en.json`/`ur.json`) had `wz.desc.tsc` and `wz.desc.peca` keys pointing at slightly different string variants from `wazuh-modules.js`, which are NOT what the Overview cards render.
+
+**Exact string differences found:**
+- TSC: `wazuh.plugin.js` has `"...Privacy."` (with trailing period); `wazuh-modules.js` omits the period
+- PECA: `wazuh.plugin.js` has `"...2016 — Pakistan's..."` (en-dash, no "(PECA)"); `wazuh-modules.js` has `"...2016 (PECA) — Pakistan's..."` (em-dash, includes acronym)
+- Network Graph: `"Visualize agent network topology..."` — entirely absent from locale files
+
+**Fix:** Added all 126 `wz-app-*` i18n keys (titles, breadcrumb labels, descriptions, category labels for all Wazuh app registrations) to `translations/ur-PK.json`. OSD now serves the Urdu strings directly for all Overview card descriptions, breadcrumbs, and nav category labels when `?locale=ur-PK` is active.
+
+**Key translations added (descriptions):**
+- `wz-app-tsc-description` → `"سیکیورٹی، دستیابی، پروسیسنگ سالمیت، رازداری، اور پرائیویسی کے لیے ٹرسٹ سروسز معیار۔"`
+- `wz-app-peca-description` → `"الیکٹرانک جرائم کی روک تھام ایکٹ 2016 — پاکستان کا سائبر کرائم قانون جو غیر مجاز رسائی، ڈیٹا چوری، اور سائبر دہشت گردی کا احاطہ کرتا ہے۔"`
+- `wz-app-network-graph-description` → `"ایجنٹ نیٹ ورک ٹوپولوجی، براہ راست کنکشنز، اور اپنی نگرانی شدہ انفراسٹرکچر میں الرٹ ٹریفک کا تصور کریں۔"`
+
+**Files:** `translations/ur-PK.json` (126 new keys added)
+
+### Build result
+```
+webpack compiled successfully
+Bundle: 131 KB
+translations/ur-PK.json: 173 messages (was 47)
+Service: active ✓
+```
+
+---
+
+## 2026-04-30 — Loading screen dark mode, sidebar locale leak, and full coverage audit
+
+### Fix 1 — Loading screen still in light mode after previous dark-mode work
+
+**Symptoms reported:**
+1. The OSD initial loading screen (Wazuh-branded spinner) had a white background when dark mode was active.
+2. The Wazuh API health-check page (`/health-check`) also appeared in light mode despite `fyp_theme_v2 = 'dark'` in localStorage.
+
+**Root cause — timing:** `DARK_CSS` was injected inside `loadPreferences()`, which itself runs inside a `setTimeout(..., 500)` in `start()`. The 500 ms delay was originally necessary to let OSD's React tree mount before injecting the toolbar, but it meant dark mode CSS was absent for the first half-second — exactly the window during which the health-check component renders.
+
+**Fix 1a — Early module-level injection:** Added an IIFE immediately after the `DARK_CSS` array definition (before `setup()` is ever called) that reads `localStorage.getItem('fyp_theme_v2')` and injects the `<style id="fyp-dark-mode">` tag synchronously at module load time. `injectStyle()` in `setDarkMode()` still works correctly: it finds the existing element by id and updates `textContent` rather than creating a duplicate.
+
+**Fix 1b — OSD initial loading screen selectors:** Added `.osdWelcomeView`, `.osdWelcomeTitle`, `.osdWelcomeText`, `.osdProgress` to `DARK_CSS`. These are the classes used by OSD's server-rendered loading spinner (`src/core/server/rendering/views/styles.js`).
+
+**Fix 1c — OSD app mount container:** Added `[id^="application-"]` to `DARK_CSS`. OSD mounts each registered application inside a div with id `application-{appId}` — this is the direct parent of the Wazuh health-check React tree.
+
+**Files changed:** `public/index.js`
+
+---
+
+### Fix 2 — Some sidebar / hamburger menu entries appearing in Urdu when in English mode
+
+**Root cause:** When the user had `fyp_language = 'en'` in localStorage but `?locale=ur-PK` was still present in the URL (from a bookmarked link, stale navigation, or browser back/forward), `loadPreferences()` fell through the `if (savedLang === 'ur')` branch without ever calling `_ensureLocaleUrl('en')`. OSD's i18n service then served all Urdu strings from `ur-PK.json` regardless of the user's saved preference.
+
+**Fix:** Added an `else` branch in `loadPreferences()` that calls `_ensureLocaleUrl('en')` when the saved language is not Urdu. This removes any stale `?locale=ur-PK` from the URL and reloads, ensuring the URL and localStorage stay in sync.
+
+**Files changed:** `public/index.js` — `loadPreferences()` else branch added
+
+---
+
+### Phase 16 — Full coverage audit and gap-fill
+
+A comprehensive audit of all Wazuh Dashboard plugins was conducted to find untranslated strings and dark mode CSS gaps. The following changes were made across all four FYP plugins.
+
+#### localization — DARK_CSS additions
+
+**Wazuh navigation menu (Group 1):** Added overrides for Wazuh's own menu classes that set light backgrounds outside the EUI system:
+- `.wz-menu`, `.wz-menu-sections` → `#0d1527`
+- `.wz-menu-agent-info` → `#0d1527`
+- `.wz-menu-select-option` → `#1e293b` (bg) + `#e2e8f0` (text)
+- `.wz-module-header-nav` → `#0d1527`
+- `.wz-welcome-page-agent-tabs` → `#0d1527`
+- `.wz-circle-back-button` → `#1e293b`
+- `.wz-input-text` → `#1e293b` (bg) + `#e2e8f0` (text)
+- `.registerAgent`, `.register-agent-wizard-container` → `#0f172a`
+- `.history-list` → `#1e293b`
+
+**OSD components (Group 2):** Added overrides for OSD components that were missed:
+- `.osdOverviewPageHeader` → `#0d1527` bg + `#334155` border
+- `.osdTypeahead__popover` → `#1e293b` bg + `#e2e8f0` text
+- `.cancelBtn` → `#1e293b` bg + `#e2e8f0` text
+- `.panel-heading` → `#e2e8f0` text
+- `.error-notify` → `#f87171` text
+- `.dshExitFullScreenButton` → `#1e293b` bg
+- `.cv-ov-card` → `#1e293b` bg + `#334155` border
+
+#### localization — Translation additions (en.json / ur.json)
+
+Added 25 keys covering nav items and long-form descriptions that were in the Wazuh bundle but absent from the DOM-replacement map:
+
+**New `nav.*` keys (11):** `nav.appSettings`, `nav.endpoints`, `nav.reporting`, `nav.sampleData`, `nav.security`, `nav.serverApis`, `nav.serverMgmt`, `nav.statistics`, `nav.summary`, `nav.indexerMgmt`, `nav.networkGraph`
+
+**New `desc.*` keys (14):** `desc.endpointsSummary`, `desc.aboutLong`, `desc.overviewLong`, `desc.serverApisLong`, `desc.securityLong`, `desc.groupsMgmt`, `desc.clusterMgmt`, `desc.cdbListsMgmt`, `desc.settingsMgmt`, `desc.decodersMgmt`, `desc.rulesMgmt`, `desc.statusMgmt`, `desc.complianceOvLong`, `desc.networkGraphLong`, `desc.statsEnv`
+
+Total locale keys: **984 → 1009**
+
+#### localization — ur-PK.json additions (OSD native i18n)
+
+Added 14 OSD native i18n keys that were missing, causing the hamburger nav section headers and OSD app titles to appear in English when in Urdu mode:
+
+**`core.ui.group.*` (7 keys):** `all.title`, `dataAdministration.title`, `essential.title`, `observability.title`, `search.title`, `security.analytics.title`, `settingsAndSetup.title` — these are the collapsible section headers inside the left-hand hamburger nav.
+
+**OSD built-in app labels (7 keys):** `home.breadcrumbs.homeTitle`, `home.icon.nav.title`, `home.featureCatalogue.directoryTitle`, `devTools.helpMenu.appName`, `visualize.helpMenu.appName`, `management.breadcrumb`, `savedObjectsManagement.breadcrumb.index`
+
+Total ur-PK.json messages: **173 → 187**
+
+#### complianceView — Dark mode !important fixes
+
+**Root cause:** Light-mode base rules used `!important` (`background: #f8fafc !important`, `background: #ffffff !important`, etc.) while the corresponding dark-theme overrides had no `!important`. Since both selectors had equal specificity (`.cv-root.dark-theme .cv-card` vs `.cv-card`), the base `!important` was winning unconditionally.
+
+**Fix:** Added `!important` to all dark-theme overrides that need to beat a base-rule `!important`:
+- `.cv-root.dark-theme` — background and color
+- `.cv-root.dark-theme .cv-header` — background and border-color
+- `.cv-root.dark-theme .cv-card` — background
+- `.cv-root.dark-theme .cv-card-count` — color
+- `.cv-root.dark-theme .cv-table th` — background, color, border-bottom-color
+- `.cv-root.dark-theme .cv-table th:hover` — color
+- `.cv-root.dark-theme .cv-table td` — color
+- `.cv-root.dark-theme .cv-table tr.cv-zero/med/high td` — color
+- `.cv-root.dark-theme .cv-matrix th` — background, color, border-color
+- `.cv-root.dark-theme .cv-matrix td` — added missing `background` and `color` declarations + `!important`
+- `.cv-root.dark-theme .cv-matrix .row-label` — background and color
+- `.cv-root.dark-theme .cv-matrix .diag` — background and color
+
+**Files changed:** `complianceView/public/index.js`
+
+#### nlqSearch — Full dark mode implemented
+
+**Root cause:** The plugin had no dark mode support at all. All backgrounds and colors were set via `element.style.cssText` (inline styles), which cannot be overridden by CSS class rules without `!important`.
+
+**Fix:** Implemented the same pattern used by `networkGraph`:
+1. Added `injectNlqDarkCSS()` IIFE — injects `<style id="nlq-dark-style">` once into `<head>` with `!important` overrides for all inline-styled elements.
+2. Added `applyNlqTheme(el)` — reads `localStorage.getItem('fyp_theme_v2')` and toggles `.nlq-dark` class on root.
+3. Added `window.addEventListener('fyp-theme-changed', ...)` in `mountApp()` so theme changes apply without page reload.
+4. Added `className` properties to all key elements: `nlq-root`, `nlq-header`, `nlq-search-area`, `nlq-ir-area`, `nlq-dsl-input-area`, `nlq-results-area`, `nlq-table`, `nlq-summary`, `nlq-ir-editor`, `nlq-dsl-display`, `nlq-dsl-input-editor`, `nlq-note`, `nlq-status`.
+
+**Dark-mode color mappings:**
+- Backgrounds: `#f8fafc`/`#f1f5f9` → `#0d1527`; `#ffffff`/`#f7fafc` (table rows) → `#0f172a`/`#1a2234`
+- Text: `#1a202c` → `#e2e8f0`; `#718096` → `#64748b`
+- IR JSON editor: `#276749` (green) → `#4ade80`
+- DSL display: `#744210` (amber) → `#fb923c`
+
+**Files changed:** `nlqSearch/public/index.js`
+
+#### networkGraph — Missing dark-theme overrides added
+
+Added two CSS rules to the `.ng-layout.dark-theme` block that were missing:
+- `.ng-investigate-link` → `#60a5fa` (light blue, was `#3182ce` mid-blue — hard to read on dark sidebar)
+- `.ng-empty-state` → `#94a3b8` text (was `#718096` — too dark against `#1e293b` sidebar)
+
+**Files changed:** `networkGraph/public/index.js`
+
+### Build results
+```
+localization:   webpack compiled successfully — 1009 EN→UR keys, 187 ur-PK.json messages
+complianceView: webpack compiled successfully
+nlqSearch:      webpack compiled successfully
+networkGraph:   webpack compiled successfully
+All services: active ✓
+```
+
+---
+
+## 2026-04-30 — Remaining small gaps fixed
+
+### Fix 1 — Two missing wz-app title keys in ur-PK.json
+
+`wz-app-cdb-lists-title` and `wz-app-server-status-title` were absent from `translations/ur-PK.json`. We had `wz-app-lists-title` and `wz-app-status-title` but OSD looks up the canonical app ID form. Added:
+- `wz-app-cdb-lists-title` → `"CDB فہرستیں"`
+- `wz-app-server-status-title` → `"حالت"`
+
+**Files:** `translations/ur-PK.json`
+
+### Fix 2 — Three plugin.js string variants missing from DOM-replacement map
+
+The Overview page module cards render via `i18n.translate()` (Track B, handled by `ur-PK.json`), but the same description strings appear in DOM text nodes on other pages (breadcrumbs, tooltips, detail panels) via `wazuh.plugin.js` JSX. The `wazuh.plugin.js` variants differ slightly from the `wazuh-modules.js` variants already in `en.json`:
+
+| Key | en.json variant (modules.js) | plugin.js variant (missing) |
+|-----|------------------------------|------------------------------|
+| `wz.desc.pci` | `"store or transmit"` | `"store, or transmit"` (Oxford comma) |
+| `wz.desc.tsc` | no trailing period | trailing period `.` |
+| `wz.desc.peca` | includes `(PECA)` | no `(PECA)` acronym |
+
+Added three new keys with the plugin.js variants: `wz.desc.pci.v2`, `wz.desc.tsc.v2`, `wz.desc.peca.v2`.
+
+Total locale keys: **1009 → 1012**
+
+**Files:** `locales/en.json`, `locales/ur.json`
+
+### Build result
+```
+webpack compiled successfully
+localization: 1012 EN→UR keys, 189 ur-PK.json messages
+Service: active ✓
+```

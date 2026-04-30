@@ -1,0 +1,362 @@
+{
+  "formats": {
+    "number": {
+      "currency": { "style": "currency" },
+      "percent":  { "style": "percent" }
+    },
+    "date": {
+      "short":  { "month": "numeric",  "day": "numeric",  "year": "2-digit" },
+      "medium": { "month": "short",    "day": "numeric",  "year": "numeric" },
+      "long":   { "month": "long",     "day": "numeric",  "year": "numeric" },
+      "full":   { "weekday": "long",   "month": "long",   "day": "numeric", "year": "numeric" }
+    },
+    "time": {
+      "short":  { "hour": "numeric", "minute": "numeric", "meridiem": "short" },
+      "medium": { "hour": "numeric", "minute": "numeric", "second": "numeric", "meridiem": "short" }
+    }
+  },
+  "messages": {
+    "core.application.appNotFound.pageDescription": "اس URL پر کوئی ایپلیکیشن نہیں ملی۔ واپس جانے کی کوشش کریں یا مینو سے ایپلیکیشن منتخب کریں۔",
+    "core.application.appNotFound.title": "ایپلیکیشن نہیں ملی",
+    "core.application.appRenderError.defaultTitle": "ایپلیکیشن میں خرابی",
+
+    "core.chrome.legacyBrowserWarning": "آپ کا براؤزر OpenSearch Dashboards کی حفاظتی ضروریات پوری نہیں کرتا۔",
+
+    "core.fatalErrors.somethingWentWrongTitle": "کچھ غلط ہو گیا",
+    "core.fatalErrors.tryRefreshingPageDescription": "صفحہ ریفریش کریں۔ اگر کام نہ کرے تو پچھلے صفحے پر واپس جائیں یا سیشن ڈیٹا صاف کریں۔",
+    "core.fatalErrors.goBackButtonLabel": "واپس جائیں",
+    "core.fatalErrors.clearYourSessionButtonLabel": "سیشن صاف کریں",
+
+    "core.notifications.errorToast.closeModal": "بند کریں",
+    "core.notifications.globalToast.ariaLabel": "اطلاعات کی فہرست",
+
+    "core.euiBreadcrumbs.collapsedBadge.ariaLabel": "تمام بریڈکرمبز دکھائیں",
+
+    "core.euiBasicTable.selectAllRows": "تمام قطاریں منتخب کریں",
+    "core.euiBasicTable.selectThisRow": "یہ قطار منتخب کریں",
+    "core.euiBasicTable.tableDescription": "نیچے {itemCount} اشیاء کی ایک جدول ہے۔",
+
+    "core.euiTablePagination.rowsPerPage": "فی صفحہ قطاریں",
+    "core.euiTablePagination.rowsPerPageOption": "{rowsPerPage} قطاریں",
+    "core.euiTableSortMobile.sorting": "ترتیب",
+
+    "core.euiPagination.nextPage": "اگلا صفحہ",
+    "core.euiPagination.previousPage": "پچھلا صفحہ",
+    "core.euiPagination.pageOfTotal": "صفحہ {page} از {total}",
+    "core.euiPagination.jumpToLastPage": "آخری صفحے پر جائیں {pageCount}",
+
+    "core.euiColumnSelector.hideAll": "سب چھپائیں",
+    "core.euiColumnSelector.selectAll": "سب دکھائیں",
+    "core.euiColumnSorting.clearAll": "ترتیب صاف کریں",
+    "core.euiColumnSorting.emptySorting": "ابھی کوئی فیلڈ ترتیب شدہ نہیں ہے",
+    "core.euiColumnSorting.pickFields": "ترتیب دینے کے لیے فیلڈز منتخب کریں",
+    "core.euiColumnSortingDraggable.defaultSortAsc": "الف-ے",
+    "core.euiColumnSortingDraggable.defaultSortDesc": "ے-الف",
+
+    "core.euiCollapsedItemActions.allActions": "تمام اعمال",
+
+    "core.euiComboBoxOptionsList.allOptionsSelected": "آپ نے تمام دستیاب آپشنز منتخب کر لی ہیں",
+    "core.euiComboBoxOptionsList.alreadyAdded": "{label} پہلے سے شامل ہے",
+    "core.euiComboBoxOptionsList.loadingOptions": "آپشنز لوڈ ہو رہی ہیں",
+    "core.euiComboBoxOptionsList.noAvailableOptions": "کوئی آپشن دستیاب نہیں",
+    "core.euiComboBoxOptionsList.noMatchingOptions": "{searchValue} سے کوئی آپشن مطابقت نہیں رکھتی",
+
+    "core.euiSelectable.loadingOptions": "آپشنز لوڈ ہو رہی ہیں",
+    "core.euiSelectable.noAvailableOptions": "کوئی آپشن دستیاب نہیں",
+    "core.euiSelectable.noMatchingOptions": "{searchValue} سے کوئی آپشن مطابقت نہیں رکھتی",
+
+    "core.euiSuperSelectControl.selectAnOption": "ایک آپشن منتخب کریں: {selectedValue} منتخب ہے",
+
+    "core.euiCardSelect.select": "منتخب کریں",
+    "core.euiCardSelect.selected": "منتخب",
+    "core.euiCardSelect.unavailable": "دستیاب نہیں",
+
+    "core.euiCodeBlock.copyButton": "نقل کریں",
+
+    "core.euiFilterButton.filterBadge": "{count} فلٹر",
+
+    "core.euiForm.addressFormErrors": "فارم کی غلطیاں درست کریں۔",
+    "core.euiFormControlLayoutClearButton.label": "ان پٹ صاف کریں",
+
+    "core.euiHeaderAlert.dismiss": "رد کریں",
+    "core.euiHeaderLinks.appNavigation": "ایپلیکیشن نیویگیشن",
+    "core.euiHeaderLinks.openNavigationMenu": "نیویگیشن مینو کھولیں",
+
+    "core.euiModal.closeModal": "بند کریں",
+
+    "core.euiQuickSelect.applyButton": "لاگو کریں",
+    "core.euiQuickSelect.fullDescription": "ابھی {timeTense} {timeValue} {timeUnit} پر سیٹ ہے۔",
+    "core.euiQuickSelect.legendText": "وقت کی حد کا فوری انتخاب",
+    "core.euiQuickSelect.nextLabel": "اگلی ونڈو",
+    "core.euiQuickSelect.previousLabel": "پچھلی ونڈو",
+    "core.euiQuickSelect.quickSelectTitle": "فوری انتخاب",
+    "core.euiQuickSelect.tenseLabel": "وقت",
+    "core.euiQuickSelect.unitLabel": "وقت کی اکائی",
+    "core.euiQuickSelect.valueLabel": "وقت کی قدر",
+
+    "core.euiRefreshInterval.legend": "ہر اتنے وقت بعد ریفریش کریں",
+    "core.euiRefreshInterval.start": "شروع کریں",
+    "core.euiRefreshInterval.stop": "بند کریں",
+
+    "core.euiCommonlyUsedTimeRanges.legend": "عام طور پر استعمال شدہ",
+
+    "core.euiSuperDatePicker.showDatesButtonLabel": "تاریخیں دکھائیں",
+
+    "core.euiSuperUpdateButton.cannotUpdateTooltip": "اپ ڈیٹ نہیں ہو سکتا",
+    "core.euiSuperUpdateButton.clickToApplyTooltip": "لاگو کرنے کے لیے کلک کریں",
+    "core.euiSuperUpdateButton.refreshButtonLabel": "ریفریش",
+    "core.euiSuperUpdateButton.updateButtonLabel": "اپ ڈیٹ کریں",
+    "core.euiSuperUpdateButton.updatingButtonLabel": "اپ ڈیٹ ہو رہا ہے",
+
+    "core.euiRelativeTab.relativeDate": "{position} کی تاریخ",
+    "core.euiRelativeTab.roundingLabel": "{unit} تک گول کریں",
+    "core.euiRelativeTab.unitInputLabel": "متعلقہ وقت کا وقفہ",
+
+    "core.euiToast.dismissToast": "اطلاع بند کریں",
+    "core.euiToast.newNotification": "نئی اطلاع آئی ہے",
+    "core.euiToast.notification": "اطلاع",
+
+    "dashboard.actions.toggleExpandPanelMenuItem.expandedDisplayName": "چھوٹا کریں",
+    "dashboard.actions.toggleExpandPanelMenuItem.notExpandedDisplayName": "پینل بڑا کریں",
+    "dashboard.addExistingVisualizationLinkText": "موجودہ آبجیکٹ شامل کریں",
+    "dashboard.addPanel.noMatchingObjectsMessage": "کوئی مطابق آبجیکٹ نہیں ملا۔",
+    "dashboard.changeViewModeConfirmModal.cancelButtonLabel": "ترمیم جاری رکھیں",
+    "dashboard.changeViewModeConfirmModal.confirmButtonLabel": "تبدیلیاں ضائع کریں",
+    "dashboard.changeViewModeConfirmModal.discardChangesTitle": "ڈیش بورڈ کی تبدیلیاں ضائع کریں؟",
+    "dashboard.createNewVisualizationButton": "بنائیں",
+    "dashboard.dashboardAppBreadcrumbsTitle": "ڈیش بورڈز",
+    "dashboard.dashboardBreadcrumbsTitle": "ڈیش بورڈز",
+    "dashboard.dashboardPageTitle": "ڈیش بورڈز",
+    "dashboard.emptyDashboardTitle": "یہ ڈیش بورڈ خالی ہے۔",
+    "dashboard.factory.displayName": "ڈیش بورڈ",
+    "dashboard.featureCatalogue.dashboardDescription": "محفوظ شدہ ویژوالائزیشنز اور تلاشوں کا مجموعہ دیکھیں اور شیئر کریں۔",
+    "dashboard.featureCatalogue.dashboardTitle": "ڈیش بورڈ",
+    "dashboard.helpMenu.appName": "ڈیش بورڈز",
+    "dashboard.listing.createNewDashboard.createButtonLabel": "نیا ڈیش بورڈ بنائیں",
+    "dashboard.listing.createNewDashboard.title": "اپنا پہلا ڈیش بورڈ بنائیں",
+    "dashboard.listing.dashboardsTitle": "ڈیش بورڈز",
+    "dashboard.listing.noItemsMessage": "آپ کے پاس کوئی ڈیش بورڈ نہیں ہے۔",
+    "dashboard.listing.table.columnUpdatedAtName": "آخری تازہ کاری",
+    "dashboard.listing.table.descriptionColumnName": "تفصیل",
+    "dashboard.listing.table.titleColumnName": "عنوان",
+    "dashboard.listing.table.typeColumnName": "قسم",
+    "dashboard.panel.clonePanel": "پینل کلون کریں",
+    "dashboard.panel.clonedToast": "پینل کلون ہو گیا",
+    "dashboard.savedDashboard.newDashboardTitle": "نیا ڈیش بورڈ",
+    "dashboard.topNav.addButtonAriaLabel": "ڈیش بورڈ میں پینل شامل کریں",
+
+    "opensearch-dashboards-react.editActionDropdown.edit": "ترمیم کریں",
+    "opensearch-dashboards-react.exitFullScreenButton.exitFullScreenModeButtonText": "مکمل اسکرین سے باہر جائیں",
+    "opensearch-dashboards-react.exitFullScreenButton.exitFullScreenModeButtonAriaLabel": "مکمل اسکرین موڈ سے باہر جائیں",
+    "opensearch-dashboards-react.osdOverviewPageHeader.addDataButtonLabel": "ڈیٹا شامل کریں",
+    "opensearch-dashboards-react.osdOverviewPageHeader.devToolsButtonLabel": "ڈیولپر ٹولز",
+    "opensearch-dashboards-react.osdOverviewPageHeader.stackManagementButtonLabel": "منظم کریں",
+    "opensearch-dashboards-react.pageFooter.makeDefaultRouteLink": "اسے میرا پہلا صفحہ بنائیں",
+    "opensearch-dashboards-react.pageFooter.changeHomeRouteLink": "لاگ ان پر مختلف صفحہ دکھائیں",
+    "opensearch-dashboards-react.tableListView.listing.table.actionTitle": "اعمال",
+    "opensearch-dashboards-react.tableListView.listing.table.editActionName": "ترمیم کریں",
+    "opensearch-dashboards-react.tableListView.listing.table.editActionDescription": "ترمیم کریں",
+    "opensearch-dashboards-react.tableListView.listing.noAvailableItemsMessage": "کوئی {entityNamePlural} دستیاب نہیں۔",
+    "opensearch-dashboards-react.tableListView.listing.noMatchedItemsMessage": "آپ کی تلاش سے کوئی {entityNamePlural} مطابقت نہیں رکھتے۔",
+    "opensearch-dashboards-react.tableListView.listing.deleteSelectedItemsConfirmModal.cancelButtonLabel": "منسوخ کریں",
+    "opensearch-dashboards-react.tableListView.listing.deleteSelectedItemsConfirmModal.confirmButtonLabel": "حذف کریں",
+    "opensearch-dashboards-react.tableListView.listing.fetchErrorTitle": "فہرست حاصل کرنے میں خرابی",
+
+    "queryEnhancements.queryAssist.input.placeholderWithoutIndex": "سوال کرنے کے لیے ایک انڈیکس منتخب کریں",
+    "queryEnhancements.queryAssist.input.placeholderWithIndex": "{selectedIndex} کے بارے میں سوال کریں",
+    "queryEnhancements.queryAssist.summary.generating": "جواب تیار ہو رہا ہے...",
+    "queryEnhancements.queryAssist.summary.goodResponse": "اچھا جواب",
+    "queryEnhancements.queryAssist.summary.badResponse": "خراب جواب",
+    "queryEnhancements.queryAssist.summary.copy": "کلپ بورڈ پر نقل کریں",
+    "queryEnhancements.queryAssist.error.title": "خرابی",
+    "queryEnhancements.queryAssist.error.viewMore": "مزید دیکھیں",
+    "queryEnhancements.queryAssist.error.viewLess": "کم دیکھیں",
+
+    "wz-app-about-breadcrumbLabel": "کے بارے میں",
+    "wz-app-about-description": "ایپ ورژن اور کمیونٹی روابط کے بارے میں معلومات دکھائیں۔",
+    "wz-app-about-title": "کے بارے میں",
+
+    "wz-app-amazon-web-services-breadcrumbLabel": "Amazon Web Services",
+    "wz-app-amazon-web-services-description": "AWS API کے ذریعے براہ راست اکٹھے کیے گئے Amazon AWS سروسز کے سیکیورٹی واقعات۔",
+    "wz-app-amazon-web-services-title": "Amazon Web Services",
+
+    "wz-app-category-agents-management": "ایجنٹس کا انتظام",
+    "wz-app-category-cloud-security": "کلاؤڈ سیکیورٹی",
+    "wz-app-category-dashboard-management": "ڈیش بورڈ انتظام",
+    "wz-app-category-endpoint-security": "اینڈ پوائنٹ سیکیورٹی",
+    "wz-app-category-home": "ہوم",
+    "wz-app-category-security-operations": "سیکیورٹی آپریشنز",
+    "wz-app-category-server-management": "سرور انتظام",
+    "wz-app-category-system-inventory": "سسٹم انوینٹری",
+    "wz-app-category-threat-intelligence": "خطرات کی انٹیلیجنس",
+
+    "wz-app-cdb-lists-breadcrumbLabel": "CDB فہرستیں",
+    "wz-app-cdb-lists-description": "اپنے کلسٹر کی CDB فہرست منظم کریں۔",
+    "wz-app-cdb-lists-title": "CDB فہرستیں",
+
+    "wz-app-cluster-breadcrumbLabel": "کلسٹر",
+    "wz-app-cluster-description": "اپنا کلسٹر منظم کریں۔",
+    "wz-app-cluster-title": "کلسٹر",
+
+    "wz-app-compliance-overview-breadcrumbLabel": "تعمیل جائزہ",
+    "wz-app-compliance-overview-description": "PCI DSS، HIPAA، GDPR، NIST 800-53، TSC، اور PECA کی خلاف ورزیوں کا مشترک ڈیش بورڈ۔",
+    "wz-app-compliance-overview-title": "تعمیل جائزہ",
+
+    "wz-app-configuration-assessment-breadcrumbLabel": "ترتیب جائزہ",
+    "wz-app-configuration-assessment-description": "ترتیب جائزے کے آڈٹ کے حصے کے طور پر اپنے اثاثوں کا اسکین کریں۔",
+    "wz-app-configuration-assessment-title": "ترتیب جائزہ",
+
+    "wz-app-decoders-breadcrumbLabel": "ڈیکوڈرز",
+    "wz-app-decoders-description": "اپنے کلسٹر کے ڈیکوڈرز منظم کریں۔",
+    "wz-app-decoders-title": "ڈیکوڈرز",
+
+    "wz-app-dev-tools-breadcrumbLabel": "ڈیو ٹولز",
+    "wz-app-dev-tools-description": "API اینڈ پوائنٹس آزمائیں۔",
+    "wz-app-dev-tools-title": "ڈیو ٹولز",
+
+    "wz-app-docker-breadcrumbLabel": "ڈاکر",
+    "wz-app-docker-description": "ڈاکر کنٹینرز کی سرگرمی نگرانی کریں، جیسے بنانا، چلانا، شروع، بند یا رکانا۔",
+    "wz-app-docker-title": "ڈاکر",
+
+    "wz-app-endpoint-groups-breadcrumbLabel": "گروپس",
+    "wz-app-endpoint-groups-description": "اپنے ایجنٹ گروپس منظم کریں۔",
+    "wz-app-endpoint-groups-title": "گروپس",
+
+    "wz-app-endpoints-summary-breadcrumbLabel": "اینڈ پوائنٹس",
+    "wz-app-endpoints-summary-description": "ایجنٹس اور ان کی حالت کا خلاصہ۔",
+    "wz-app-endpoints-summary-title": "خلاصہ",
+
+    "wz-app-file-integrity-monitoring-breadcrumbLabel": "فائل سالمیت نگرانی",
+    "wz-app-file-integrity-monitoring-description": "فائل تبدیلیوں سے متعلق الرٹس، بشمول اجازتیں، مواد، ملکیت اور خصوصیات۔",
+    "wz-app-file-integrity-monitoring-title": "فائل سالمیت نگرانی",
+
+    "wz-app-gdpr-breadcrumbLabel": "GDPR",
+    "wz-app-gdpr-description": "جنرل ڈیٹا پروٹیکشن ریگولیشن (GDPR) ذاتی ڈیٹا کی پروسیسنگ کے لیے رہنما اصول مقرر کرتا ہے۔",
+    "wz-app-gdpr-title": "GDPR",
+
+    "wz-app-github-breadcrumbLabel": "GitHub",
+    "wz-app-github-description": "اپنی GitHub تنظیموں کے آڈٹ لاگز کے واقعات کی نگرانی۔",
+    "wz-app-github-title": "GitHub",
+
+    "wz-app-google-cloud-breadcrumbLabel": "Google Cloud",
+    "wz-app-google-cloud-description": "GCP API کے ذریعے براہ راست اکٹھے کیے گئے Google Cloud Platform سروسز کے سیکیورٹی واقعات۔",
+    "wz-app-google-cloud-title": "Google Cloud",
+
+    "wz-app-hipaa-breadcrumbLabel": "HIPAA",
+    "wz-app-hipaa-description": "ہیلتھ انشورنس پورٹیبلٹی اینڈ اکاؤنٹیبلٹی ایکٹ 1996 (HIPAA) طبی معلومات کی حفاظت کے لیے ڈیٹا پرائیویسی اور سیکیورٹی دفعات فراہم کرتا ہے۔",
+    "wz-app-hipaa-title": "HIPAA",
+
+    "wz-app-home-breadcrumbLabel": "جائزہ",
+    "wz-app-home-title": "جائزہ",
+
+    "wz-app-it-hygiene-breadcrumbLabel": "IT حفظان صحت",
+    "wz-app-it-hygiene-description": "سسٹم، سافٹ ویئر، عملیات، اور نیٹ ورک پرتوں کا جائزہ لیں تاکہ غلط ترتیبات، غیر مجاز تبدیلیاں اور بے قاعدگیاں دریافت کی جا سکیں۔",
+    "wz-app-it-hygiene-title": "IT حفظان صحت",
+
+    "wz-app-lists-title": "CDB فہرستیں",
+
+    "wz-app-logs-breadcrumbLabel": "لاگز",
+    "wz-app-logs-description": "آپ کے کلسٹر کے لاگز۔",
+    "wz-app-logs-title": "لاگز",
+
+    "wz-app-malware-detection-breadcrumbLabel": "میلویئر کا پتہ لگانا",
+    "wz-app-malware-detection-description": "میلویئر انفیکشنز یا سائبر حملوں کے خطرے کے اشارے جانچیں۔",
+    "wz-app-malware-detection-title": "میلویئر کا پتہ لگانا",
+
+    "wz-app-microsoft-graph-api-breadcrumbLabel": "Microsoft Graph API",
+    "wz-app-microsoft-graph-api-description": "Microsoft Graph API کے ذریعے براہ راست اکٹھے کیے گئے Microsoft Graph سروسز کے سیکیورٹی واقعات۔",
+    "wz-app-microsoft-graph-api-title": "Microsoft Graph API",
+
+    "wz-app-mitre-attack-breadcrumbLabel": "MITRE ATT&CK",
+    "wz-app-mitre-attack-description": "بہتر خطرے کی سمجھ کے لیے دشمن کی حکمت عملیوں اور تکنیکوں سے نقشہ بند سیکیورٹی الرٹس تلاش کریں۔",
+    "wz-app-mitre-attack-title": "MITRE ATT&CK",
+
+    "wz-app-network-graph-breadcrumbLabel": "نیٹ ورک گراف",
+    "wz-app-network-graph-description": "ایجنٹ نیٹ ورک ٹوپولوجی، براہ راست کنکشنز، اور اپنی نگرانی شدہ انفراسٹرکچر میں الرٹ ٹریفک کا تصور کریں۔",
+    "wz-app-network-graph-title": "نیٹ ورک گراف",
+
+    "wz-app-nist-800-53-breadcrumbLabel": "NIST 800-53",
+    "wz-app-nist-800-53-description": "نیشنل انسٹیٹیوٹ آف اسٹینڈرڈز اینڈ ٹیکنالوجی اسپیشل پبلیکیشن 800-53 (NIST 800-53) وفاقی معلوماتی نظاموں کے لیے رہنما اصول مقرر کرتا ہے۔",
+    "wz-app-nist-800-53-title": "NIST 800-53",
+
+    "wz-app-office365-breadcrumbLabel": "Office 365",
+    "wz-app-office365-description": "آپ کی Office 365 سروسز سے متعلق سیکیورٹی واقعات۔",
+    "wz-app-office365-title": "Office 365",
+
+    "wz-app-overview-description": "یہ ایپلیکیشن آپ کو تمام ایپلیکیشنز کا جائزہ فراہم کرتی ہے۔",
+
+    "wz-app-pci-dss-breadcrumbLabel": "PCI DSS",
+    "wz-app-pci-dss-description": "ادائیگی کارڈ ہولڈر ڈیٹا کو پروسیس، محفوظ یا منتقل کرنے والے اداروں کے لیے عالمی سیکیورٹی معیار۔",
+    "wz-app-pci-dss-title": "PCI DSS",
+
+    "wz-app-peca-breadcrumbLabel": "PECA",
+    "wz-app-peca-description": "الیکٹرانک جرائم کی روک تھام ایکٹ 2016 — پاکستان کا سائبر کرائم قانون جو غیر مجاز رسائی، ڈیٹا چوری، اور سائبر دہشت گردی کا احاطہ کرتا ہے۔",
+    "wz-app-peca-title": "PECA",
+
+    "wz-app-reporting-breadcrumbLabel": "رپورٹنگ",
+    "wz-app-reporting-description": "اپنی محفوظ رپورٹس دیکھیں۔",
+    "wz-app-reporting-title": "رپورٹنگ",
+
+    "wz-app-rules-breadcrumbLabel": "قواعد",
+    "wz-app-rules-description": "اپنے کلسٹر کے قواعد منظم کریں۔",
+    "wz-app-rules-title": "قواعد",
+
+    "wz-app-ruleset-test-breadcrumbLabel": "قاعدہ سیٹ ٹیسٹ",
+    "wz-app-ruleset-test-description": "اپنے قاعدہ سیٹ ٹیسٹنگ لاگز دیکھیں۔",
+    "wz-app-ruleset-test-title": "قاعدہ سیٹ ٹیسٹ",
+
+    "wz-app-sample-data-breadcrumbLabel": "نمونہ ڈیٹا",
+    "wz-app-sample-data-description": "ماڈیولز میں واقعات کے ساتھ نمونہ ڈیٹا شامل کریں۔",
+    "wz-app-sample-data-title": "نمونہ ڈیٹا",
+
+    "wz-app-security-breadcrumbLabel": "سیکیورٹی",
+    "wz-app-security-description": "کرداروں اور پالیسیوں کی بنیاد پر سسٹم وسائل تک رسائی کا انتظام کریں۔",
+    "wz-app-security-title": "سیکیورٹی",
+
+    "wz-app-server-apis-breadcrumbLabel": "سرور APIs",
+    "wz-app-server-apis-description": "API اندراجات منظم اور ترتیب دیں۔",
+    "wz-app-server-apis-title": "سرور APIs",
+
+    "wz-app-server-status-breadcrumbLabel": "حالت",
+    "wz-app-server-status-description": "اپنے کلسٹر کی حالت منظم کریں۔",
+    "wz-app-server-status-title": "حالت",
+
+    "wz-app-settings-breadcrumbLabel": "ترتیبات",
+    "wz-app-settings-description": "اپنے کلسٹر کی ترتیب منظم کریں۔",
+    "wz-app-settings-title": "ترتیبات",
+
+    "wz-app-statistics-breadcrumbLabel": "اعداد و شمار",
+    "wz-app-statistics-description": "ماحول کے بارے میں معلومات۔",
+    "wz-app-statistics-title": "اعداد و شمار",
+
+    "wz-app-status-title": "حالت",
+
+    "wz-app-threat-hunting-breadcrumbLabel": "خطرہ شکار",
+    "wz-app-threat-hunting-description": "اپنے ماحول میں مسائل اور خطرات کی نشاندہی کرتے ہوئے سیکیورٹی الرٹس دیکھیں۔",
+    "wz-app-threat-hunting-title": "خطرہ شکار",
+
+    "wz-app-tsc-breadcrumbLabel": "TSC",
+    "wz-app-tsc-description": "سیکیورٹی، دستیابی، پروسیسنگ سالمیت، رازداری، اور پرائیویسی کے لیے ٹرسٹ سروسز معیار۔",
+    "wz-app-tsc-title": "TSC",
+
+    "wz-app-vulnerability-detection-breadcrumbLabel": "خطرات کا پتہ لگانا",
+    "wz-app-vulnerability-detection-description": "معلوم کریں کہ آپ کے ماحول میں کون سی ایپلیکیشنز معروف خطرات سے متاثر ہیں۔",
+    "wz-app-vulnerability-detection-title": "خطرات کا پتہ لگانا",
+
+    "core.ui.group.all.title": "تجزیات",
+    "core.ui.group.dataAdministration.title": "ڈیٹا انتظام",
+    "core.ui.group.essential.title": "بنیادی",
+    "core.ui.group.observability.title": "مشاہدہ",
+    "core.ui.group.search.title": "تلاش",
+    "core.ui.group.security.analytics.title": "سیکیورٹی تجزیات",
+    "core.ui.group.settingsAndSetup.title": "ترتیبات اور سیٹ اپ",
+
+    "home.breadcrumbs.homeTitle": "ہوم",
+    "home.icon.nav.title": "ہوم",
+    "home.featureCatalogue.directoryTitle": "ایپ ڈائریکٹری",
+    "devTools.helpMenu.appName": "ڈویلپر ٹولز",
+    "visualize.helpMenu.appName": "ویژوالائز",
+    "management.breadcrumb": "انتظام",
+    "savedObjectsManagement.breadcrumb.index": "محفوظ شدہ آبجیکٹس"
+  }
+}

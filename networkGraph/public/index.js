@@ -1030,6 +1030,8 @@ function mountApp(params) {
     '.ng-layout.dark-theme .ng-incident-ts{color:#64748b;}',
     '.ng-layout.dark-theme .ng-group-chip{background:#334155;color:#94a3b8;}',
     '.ng-layout.dark-theme .ng-show-all-btn{border-top-color:#2d3748;}',
+    '.ng-layout.dark-theme .ng-investigate-link{color:#60a5fa !important;}',
+    '.ng-layout.dark-theme .ng-empty-state{color:#94a3b8 !important;}',
 
     /* Narrow screen: sidebar as slide-over overlay */
     '@media (max-width:1199px){',

@@ -1,0 +1,9 @@
+{
+  "paths": {
+    "localization": "."
+  },
+  "exclude": [],
+  "translations": [
+    "translations/ur-PK.json"
+  ]
+}
