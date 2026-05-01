@@ -7,5 +7,5 @@
   ],
   "optionalPlugins": [],
   "server": true,
-  "ui": true
+  "ui": false
 }

@@ -2,7 +2,7 @@
 
 A unified compliance dashboard comparing alert violations across **all** compliance frameworks simultaneously: PCI DSS, HIPAA, GDPR, NIST 800-53, TSC, and PECA.
 
-Accessible natively from the Wazuh **Security Operations** sidebar at **order 400.5** (after IT Hygiene at 400, before PCI DSS at 401), via `/overview/?tab=compliance-overview&tabView=dashboard`. Also accessible as a standalone OSD app at `/app/complianceView`.
+Accessible natively from the Wazuh **Security Operations** sidebar at **order 400.5** (after IT Hygiene at 400, before PCI DSS at 401), via `/overview/?tab=compliance-overview&tabView=dashboard`.
 
 ---
 
@@ -10,22 +10,19 @@ Accessible natively from the Wazuh **Security Operations** sidebar at **order 40
 
 This feature uses a two-layer approach:
 
-### Layer 1 — Standalone OSD plugin (API server + fallback UI)
+### Layer 1 — OSD server plugin (API routes only)
 
-A minimal OSD server plugin installed at `/usr/share/wazuh-dashboard/plugins/complianceView/`. It serves three API routes that the injected UI calls to fetch compliance data from OpenSearch.
-
-The plugin also registers its own OSD application at `/app/complianceView` (with `navLinkStatus: 2` — hidden from the sidebar). This provides a direct URL fallback that works independently of the Wazuh bundle patches.
+A server-only OSD plugin installed at `/usr/share/wazuh-dashboard/plugins/complianceView/`. It registers three API routes (`/api/compliance_view/*`) that the injected UI calls to fetch compliance data from OpenSearch. The plugin has `"ui": false` — no public bundle is built or loaded by OSD.
 
 ```
 complianceView/
-  opensearch_dashboards.json   — plugin manifest (id, OSD version, server/ui flags)
-  package.json                 — npm metadata + webpack devDependencies
-  webpack.config.js            — webpack 5 build config (single output bundle)
-  install.sh                   — standalone installer (build + deploy)
+  opensearch_dashboards.json   — plugin manifest (ui: false, server: true)
+  package.json                 — npm metadata
+  install.sh                   — installer (no webpack — server files + patch + compress)
   patch_bundles.py             — idempotent bundle patcher (Layer 2)
   public/
-    bundle_entry.js            — OSD __osdBundles__.define() registration
-    index.js                   — standalone dashboard UI (unused in normal flow)
+    index.js                   — dashboard UI source (compiled into MOUNT_FN by hand;
+                                  not served by OSD — kept for editing convenience)
   server/
     index.js                   — OSD server-side entry point (plugin factory)
     plugin.js                  — plugin lifecycle class (setup/start/stop)
@@ -37,31 +34,39 @@ complianceView/
 
 `patch_bundles.py` patches the pre-compiled Wazuh JavaScript bundles to register the Compliance Overview as a native Wazuh module — exactly as PECA was added. This makes it appear in the Security Operations sidebar alongside PCI DSS, GDPR, HIPAA, NIST, TSC, and PECA.
 
-**Patches applied to `wazuh.chunk.2.js` (6):**
-1. Catalog map — adds `peca` + `compliance-overview` entries
-2. Agent tab counts — registers the modules as valid for agent view
-3. Overview tab counts — registers the modules as valid for overview
-4. Injects `mountComplianceOverview()` (vanilla JS dashboard), `ComplianceOverviewPanel` (React wrapper), and `peca_data_source_PECADataSource` (PECA data source class) after the GitHub DataSource class
-5. Adds `pecaColumns` table column definition
-6. Module tabs — adds `peca` and `compliance-overview` module definitions
+**Patches applied to `wazuh.chunk.2.js` (P1–P6):**
+- P1. Catalog map — adds `peca` + `compliance-overview` entries
+- P2. Agent tab counts — registers both modules as valid for agent view
+- P3. Overview tab counts — registers both modules as valid for overview
+- P4. Injects `mountComplianceOverview()` (vanilla JS dashboard), `ComplianceOverviewPanel` (React wrapper), and `peca_data_source_PECADataSource` (PECA data source class) after the GitHub DataSource class
+- P5. Adds `pecaColumns` table column definition
+- P6. Module tabs — adds `peca` and `compliance-overview` module definitions
 
-**Patches applied to `wazuh.plugin.js` (steps 7–11):**
-7a. Pre-clean: removes legacy `peca_app` block (if present from old installs) to prevent duplicate-id error
-7b. Adds `peca` app constant (order: 406, category: `wz-category-security-operations`)
-7c. Adds `compliance_overview_app` constant (**order: 400.5** — between IT Hygiene and PCI DSS)
-8–9. Inserts both into the apps list (sorted by order value)
-10. Upgrades existing installed bundles: swaps dark-default CSS to light-default, adds `fyp-theme-changed` listener
-11. Upgrades existing installed bundles: corrects order from 407 → 400.5
-12. Upgrades existing installed bundles: adds `!important` to key light-theme CSS declarations
+**Patches applied to `wazuh.plugin.js` (P7–P12):**
+- P7a. Pre-clean: removes legacy `peca_app` block (if present from old installs) to prevent duplicate-id error
+- P7b. Adds `peca` app constant (order: 406, category: `wz-category-security-operations`)
+- P7c. Adds `compliance_overview_app` constant (**order: 400.5** — between IT Hygiene and PCI DSS)
+- P8–P9. Inserts both into the apps list (sorted by order value)
+- P10. Upgrades existing installed bundles: swaps dark-default CSS to light-default, adds `fyp-theme-changed` listener
+- P11. Upgrades existing installed bundles: corrects order from 407 → 400.5
+- P12. Upgrades existing installed bundles: adds `!important` to key light-theme CSS declarations
+
+**Upgrade patches (P13–P17) — applied to already-installed bundles:**
+- P13. Fixes matrix td CSS in installed chunk: removes accidental `background:#fff !important` from `.cv-ov-mx td`
+- P14. (reserved / inline with P13 block)
+- P15. Adds `!important` to all dark-theme CSS overrides (`.cv-ov.dark-theme .cv-ov-card`, `.cv-ov-ccnt`, table headers/cells, matrix rows/diagonals) so they beat OSD's global light-mode stylesheet rules. This was required because `!important` in light-theme declarations cannot be overridden by a non-`!important` dark-theme rule, regardless of selector specificity.
+- P16. Removes inline JS `td.style.color` override (`'#fff'`/`'#444'`) from the installed renderOverlap function — that override made non-zero matrix cells white-on-white in light mode.
+- P17. Upgrades diagonal dark-theme colour from `#555` (contrast ratio 2.6:1 — WCAG fail) to `#94a3b8` on `#1a1a36` (contrast ratio ≈ 7:1 — WCAG AAA pass).
 
 ### Technology choices
 
 - **Vanilla JS + DOM manipulation** — `mountComplianceOverview` uses no React, no D3, no external runtime deps; wrapped in a thin React class for OSD compatibility
 - **Light theme default** — both the standalone app (`.cv-root`) and embedded panel (`.cv-ov`) default to light colors matching Wazuh Dashboard's native light mode
 - **Dark theme via `.dark-theme` class** — scoped under `.cv-root.dark-theme` and `.cv-ov.dark-theme`; toggled by reading `fyp_theme_v2` from localStorage and listening for the `fyp-theme-changed` CustomEvent from the localization plugin
-- **`!important` on key light-theme declarations** — prevents OSD/Wazuh global CSS and the localization plugin's dark-mode rules from overriding card backgrounds and table header colours
-- **Webpack 5** — compiles the standalone plugin UI into one self-contained 15 KB bundle
-- **Build in /tmp** — avoids VirtualBox shared-folder symlink restrictions
+- **`!important` on all theme declarations** — both light-theme and dark-theme CSS rules use `!important` throughout. Without `!important` on the dark overrides, the light-theme `!important` rules win regardless of selector specificity (an `!important` declaration always beats a non-`!important` one). All element/background/colour/border rules carry `!important` in both modes.
+- **Heatmap matrix colours without forced background** — matrix `td` elements have no forced `background` in CSS; the JS `renderOverlap()` function sets `td.style.background` directly via the `heatColor()` helper. Dark-mode `td` background (`#12122a`) is set via a CSS `!important` rule that is overridden at render time by the inline style (inline styles beat author-stylesheet `!important`).
+- **WCAG AA contrast** — all text/background pairs in both themes have been audited. Minimum ratio in dark mode: diagonal labels (`#94a3b8` on `#1a1a36`) ≈ 7:1. Minimum in light mode: body text (`#0f172a` on `#fff`) > 19:1.
+- **No public bundle** — `ui: false` in the manifest; OSD loads no JS from this plugin. The dashboard UI lives entirely inside the `mountComplianceOverview` function injected into `wazuh.chunk.2.js` by `patch_bundles.py`.
 - **OpenSearch aggregation queries** — counts computed server-side; no full document fetch
 - **Idempotent patching** — `patch_bundles.py` detects already-applied patches and skips them safely
 
@@ -151,7 +156,7 @@ Returns the cross-framework alert co-occurrence matrix.
 `matrix[A][A]` = total alerts for framework A (diagonal).  
 `matrix[A][B]` = alerts triggering both A and B simultaneously.
 
-**OpenSearch query used:** single `_search` with nested `filter` aggregations — one outer agg per framework, each containing one inner agg per other framework.
+**OpenSearch query used:** single `_search` with **flat** `filter` aggregations — one `filter` agg per matrix cell (N² total, where N = 6 frameworks = 36 aggs). Diagonal cells use a single-framework filter; off-diagonal cells use `bool.must: [filterA, filterB]`. This flat approach avoids a silent OpenSearch bug where nested sub-bucket results are omitted when the inner bucket count is zero, which caused all off-diagonal cells to show 0.
 
 ---
 
@@ -182,13 +187,13 @@ Returns the cross-framework alert co-occurrence matrix.
 
 ## Installation
 
-### Standalone (from this folder)
+### From this folder
 
 ```bash
 sudo bash install.sh
 ```
 
-`install.sh` is fully end-to-end: it builds the webpack bundle, installs the OSD plugin, runs `patch_bundles.py` to patch the Wazuh bundles, regenerates the `.gz` and `.br` compressed variants, and restarts the dashboard.
+`install.sh` copies the server-side plugin files, runs `patch_bundles.py` to patch the Wazuh bundles, regenerates the `.gz` and `.br` compressed variants, and restarts the dashboard. No webpack build — the plugin has `ui: false`.
 
 Use `--no-restart` to skip the service restart:
 ```bash
@@ -209,7 +214,6 @@ After installation:
 |---|---|
 | Wazuh sidebar | Security Operations → Compliance Overview (order 400.5) |
 | Wazuh overview card | Same order — appears after IT Hygiene, before PCI DSS |
-| Direct URL | `https://<host>/app/complianceView` |
 | Overview tab | `/overview/?tab=compliance-overview&tabView=dashboard` |
 
 ---

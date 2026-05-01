@@ -299,20 +299,25 @@ function defineRoutes(router, logger) {
       try {
         const gte = timeRangeToGte(request.query.time_range);
 
-        // Build a nested aggregation: for each framework, count how many of
-        // those alerts also appear in each other framework.
+        // Build flat filter aggs — one per cell in the matrix:
+        //   outerKey + '__self'           → diagonal (total alerts for that framework)
+        //   outerKey + '__' + innerKey    → off-diagonal (bool.must both frameworks)
+        // Flat aggs avoid relying on nested-agg sub-bucket behaviour that OpenSearch
+        // can silently omit when the inner count is 0 or the query is large.
         const aggs = {};
         for (const outerKey of FRAMEWORK_KEYS) {
-          const innerAggs = {};
+          aggs[outerKey + '__self'] = { filter: frameworkFilter(outerKey) };
           for (const innerKey of FRAMEWORK_KEYS) {
             if (innerKey !== outerKey) {
-              innerAggs[innerKey] = { filter: frameworkFilter(innerKey) };
+              aggs[outerKey + '__' + innerKey] = {
+                filter: {
+                  bool: {
+                    must: [frameworkFilter(outerKey), frameworkFilter(innerKey)],
+                  },
+                },
+              };
             }
           }
-          aggs[outerKey] = {
-            filter: frameworkFilter(outerKey),
-            aggs:   innerAggs,
-          };
         }
 
         const result = await osRequest(`/${OS_INDEX}/_search`, {
@@ -322,16 +327,14 @@ function defineRoutes(router, logger) {
         });
 
         // Assemble the matrix.
+        const ag = result.aggregations || {};
         const matrix = {};
         for (const outerKey of FRAMEWORK_KEYS) {
           matrix[outerKey] = {};
-          const outerBucket = result.aggregations && result.aggregations[outerKey];
-          if (!outerBucket) continue;
+          matrix[outerKey][outerKey] = (ag[outerKey + '__self'] || {}).doc_count || 0;
           for (const innerKey of FRAMEWORK_KEYS) {
-            if (innerKey === outerKey) {
-              matrix[outerKey][innerKey] = outerBucket.doc_count || 0;
-            } else {
-              matrix[outerKey][innerKey] = (outerBucket[innerKey] && outerBucket[innerKey].doc_count) || 0;
+            if (innerKey !== outerKey) {
+              matrix[outerKey][innerKey] = (ag[outerKey + '__' + innerKey] || {}).doc_count || 0;
             }
           }
         }

@@ -470,6 +470,24 @@ $(_sudo grep -oP '(?<=id=")[0-9]+' "$_f" 2>/dev/null)"
 install_aiAssistant() {
     info "=== Feature: aiAssistant — MCP Server + LLM Gateway + Dashboard plugins ==="
 
+    AI_DIR="$REPO_DIR/ai-assistant"
+    if [ ! -f "$AI_DIR/install.sh" ]; then
+        error "ai-assistant/install.sh not found at $AI_DIR/install.sh"
+        return 1
+    fi
+
+    local _NORESTART=""
+    [ "${NO_RESTART}" -eq 1 ] && _NORESTART="--no-restart"
+
+    info "Running ai-assistant/install.sh …"
+    (cd "$AI_DIR" && _sudo bash install.sh ${_NORESTART}) \
+        || { error "ai-assistant/install.sh failed"; return 1; }
+}
+
+# =============================================================================
+# Feature: aiAssistant — LEGACY INLINE (kept for reference, not called)
+# =============================================================================
+_install_aiAssistant_inline_LEGACY() {
     # ── C: OpenSearch MCP Server ──────────────────────────────────────────────
     info "--- C: Setting up OpenSearch MCP Server ---"
 
@@ -918,13 +936,14 @@ install_complianceView() {
 
     CV_DIR="$REPO_DIR/complianceView"
 
-    # ── Step 1: Build and install the standalone OSD plugin (API routes) ────────
+    # ── Step 1: Install the complianceView OSD plugin (server-side API routes only)
+    # No Node.js / webpack build required — the plugin has ui:false so no public
+    # bundle is built or loaded by OSD. The dashboard UI is injected directly into
+    # the Wazuh bundles via patch_bundles.py (mountComplianceOverview in chunk.2.js).
     if [ ! -d "$CV_DIR" ]; then
         error "complianceView directory not found at $CV_DIR — is the repo complete?"
         return 1
     fi
-
-    ensure_node
 
     # Map canonical password to the name complianceView/install.sh expects
     export OS_PASSWORD="${OS_PASSWORD:-${WAZUH_INDEXER_PASSWORD:-}}"

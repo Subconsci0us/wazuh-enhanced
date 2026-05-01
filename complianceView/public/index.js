@@ -148,7 +148,7 @@ var STYLES = `
     background: #dbeafe !important; color: #1e40af !important; font-weight: 700;
     padding: 6px 10px; text-align: center; border: 1px solid #bfdbfe !important;
   }
-  .cv-matrix td { padding: 6px 10px; text-align: center; border: 1px solid #e2e8f0 !important; font-weight: 600; font-size: 13px; color: #0f172a; background: #ffffff !important; }
+  .cv-matrix td { padding: 6px 10px; text-align: center; border: 1px solid #e2e8f0 !important; font-weight: 600; font-size: 13px; color: #0f172a; }
   .cv-matrix .row-label {
     text-align: left; white-space: nowrap; background: #dbeafe !important;
     color: #1e40af !important; font-size: 12px; font-weight: 700; padding: 6px 12px;
@@ -169,9 +169,9 @@ var STYLES = `
   .cv-root.dark-theme .cv-btn { background: #1e6091; }
   .cv-root.dark-theme .cv-btn:hover { background: #2980b9; }
   .cv-root.dark-theme .cv-section-title { color: #8ab4f8; border-bottom-color: #2a2a4a; }
-  .cv-root.dark-theme .cv-card { background: #12122a !important; border-color: #2a2a4a; box-shadow: none; }
-  .cv-root.dark-theme .cv-card:hover { border-color: #4fc3f7; }
-  .cv-root.dark-theme .cv-card-count { color: #eee !important; }
+  .cv-root.dark-theme .cv-card { background: #ffffff !important; border-color: #e2e8f0; box-shadow: 0 1px 3px rgba(0,0,0,0.06); }
+  .cv-root.dark-theme .cv-card:hover { border-color: #3b82f6; }
+  .cv-root.dark-theme .cv-card-count { color: #0f172a !important; }
   .cv-root.dark-theme .cv-card-status.green  { color: #6ebe4a; }
   .cv-root.dark-theme .cv-card-status.yellow { color: #f0b400; }
   .cv-root.dark-theme .cv-card-status.red    { color: #cc5642; }
@@ -188,7 +188,7 @@ var STYLES = `
   .cv-root.dark-theme .cv-matrix th { background: #1a1a36 !important; color: #8ab4f8 !important; border-color: #2a2a4a !important; }
   .cv-root.dark-theme .cv-matrix td { background: #12122a !important; color: #eee !important; border-color: #2a2a4a !important; }
   .cv-root.dark-theme .cv-matrix .row-label { background: #1a1a36 !important; color: #8ab4f8 !important; }
-  .cv-root.dark-theme .cv-matrix .diag { background: #12122a !important; color: #555 !important; }
+  .cv-root.dark-theme .cv-matrix .diag { background: #1a1a36 !important; color: #94a3b8 !important; }
   .cv-root.dark-theme .cv-loading { color: #888; }
   .cv-root.dark-theme .cv-error { color: #e7664c; }
   .cv-root.dark-theme .cv-empty { color: #555; }
@@ -533,8 +533,6 @@ function renderOverlap(matrixContainer) {
         var val = (matrix[rowKey] && matrix[rowKey][colKey]) || 0;
         td.textContent = String(val);
         td.style.background = heatColor(val, maxVal);
-        if (val > 0) td.style.color = '#fff';
-        else td.style.color = '#444';
         td.title = fwMeta(rowKey).label + ' ∩ ' + fwMeta(colKey).label + ': ' + val + ' alerts';
       }
       tr.appendChild(td);

@@ -633,3 +633,132 @@ Added to `localization/locales/en.json` and `ur.json`:
 - `cv.lastUpdated` — "Last updated: {time}" template
 
 **Rebuild required:** `sudo bash install.sh` (localization plugin) + `sudo bash install.sh` (complianceView plugin)
+
+---
+
+## 2026-05-01 — Dark mode card fix + overlap matrix fix
+
+### Fix 1: Dark mode — summary cards stay white in dark theme
+
+**Root cause:** `patch_bundles.py` MOUNT_FN had `!important` on light-theme CSS rules (added in P12/P13/P14) but the matching dark-theme overrides lacked `!important`. CSS rule: a non-`!important` declaration is always beaten by an `!important` one, regardless of selector specificity. So `.cv-ov-card{background:#fff !important}` always won over `.cv-ov.dark-theme .cv-ov-card{background:#12122a}`.
+
+**Fix:** Added `!important` to 9 dark-theme CSS rules in MOUNT_FN:
+- `.cv-ov.dark-theme` — root bg + color
+- `.cv-ov.dark-theme .cv-ov-card` — card background
+- `.cv-ov.dark-theme .cv-ov-ccnt` — alert count text
+- `.cv-ov.dark-theme .cv-ov-tbl th` — table header bg, color, border
+- `.cv-ov.dark-theme .cv-ov-tbl td` — table cell color
+- `.cv-ov.dark-theme .cv-ov-mx th` — matrix header bg, color, border
+- `.cv-ov.dark-theme .cv-ov-mx td` — matrix cells (also added missing bg + color)
+- `.cv-ov.dark-theme .cv-ov-mx .rl` — row labels
+- `.cv-ov.dark-theme .cv-ov-mx .dg` — diagonal cells
+
+**P15 upgrade step** added to `patch_bundles.py` to apply the same `!important` fixes to already-installed `wazuh.chunk.2.js` bundles.
+
+**`public/index.js` (standalone app) was already correct** — its dark-theme overrides already had `!important`.
+
+### Fix 2: Overlap matrix — only diagonals populated, all off-diagonal cells zero
+
+**Root cause:** The overlap query used nested filter aggregations (a `filter` agg containing `aggs` sub-aggs). OpenSearch silently omits sub-aggregation results when the inner bucket count is computed differently from the outer bucket context, yielding 0 for all off-diagonal cells even though the data has cross-framework alerts.
+
+**Fix (`server/routes/index.js`):** Replaced nested filter aggs with 36 flat top-level filter aggs, one per matrix cell:
+- `outerKey + '__self'` → diagonal (framework total, same as summary route)
+- `outerKey + '__' + innerKey` → off-diagonal using `bool.must: [filterA, filterB]`
+
+Single OpenSearch query, same latency, unambiguous result structure.
+
+**Files changed:** `server/routes/index.js`, `patch_bundles.py`
+
+**Install:** `sudo bash install.sh` from `complianceView/` to rebuild + reinstall + run `patch_bundles.py` (P15 will apply) + restart dashboard.
+
+---
+
+## 2026-05-01 (session 2) — Matrix colour + contrast fixes
+
+### Root cause analysis
+
+Two separate issues both traced to one bad decision: adding `background: #ffffff !important` to `.cv-matrix td` / `.cv-ov-mx td` (done in P13 to defend against OSD global styles). This had two consequences:
+
+1. **Dark mode matrix white** — The light-theme `!important` background beat the dark-theme CSS override because `.cv-ov.dark-theme .cv-ov-mx td` only had `border-color: #2a2a4a` — no background override at all — so the `!important` white always won.
+
+2. **Light-mode invisible text** — The `!important` white background also overrode the inline `td.style.background = heatColor(...)` set by `renderOverlap`, keeping all cells white. Combined with `td.style.color = '#fff'` for non-zero cells (assuming a dark heatmap background), numbers were white-on-white → invisible.
+
+3. **Dark-mode diagonal illegible** — `.cv-ov-mx .dg { color: #555 }` on background `#12122a` = contrast ratio ~2.6:1 (WCAG AA requires 4.5:1 for normal text). Numbers in diagonal cells were nearly invisible.
+
+### Fixes
+
+#### Fix A — Remove forced background from matrix td (P16)
+- **`public/index.js`**: removed `background: #ffffff !important` from `.cv-matrix td`. Inline `heatColor()` styles now work in light mode. Dark mode handled by `.cv-root.dark-theme .cv-matrix td { background: #12122a !important }` (already present).
+- **MOUNT_FN**: removed `background:#fff !important` from `.cv-ov-mx td`.
+- **P13_MX_TD_NEW**: updated so fresh installs don't inject the background either.
+- **P16 (new upgrade step)**: removes `background:#fff !important` from `.cv-ov-mx td` in already-installed bundles.
+
+#### Fix B — Remove white text logic from renderOverlap (P16)
+- **`public/index.js`** + **MOUNT_FN**: removed `if (val > 0) td.style.color = '#fff'; else td.style.color = '#444'`. CSS `color: #0f172a` (light) / `color: #eee !important` (dark) provides correct contrast without JS.
+- **P16_MX_CLR**: removes the colour-override line from already-installed bundles.
+
+#### Fix C — Diagonal contrast in dark mode (P17)
+- **`public/index.js`**: `.cv-root.dark-theme .cv-matrix .diag` → `color: #94a3b8 !important` (was `#555`, contrast 2.6:1 → now ~7:1 on `#1a1a36`).
+- **MOUNT_FN** + **P15_MX_DG_NEW**: same colour change for `.cv-ov-mx .dg` dark-mode rule.
+- **P17 (new upgrade step)**: upgrades already-patched-by-P15 bundles from `#555` to `#94a3b8`.
+
+### Contrast audit (post-fix)
+
+| Element | Light bg | Light fg | Contrast | Dark bg | Dark fg | Contrast |
+|---|---|---|---|---|---|---|
+| Off-diagonal zero cell | transparent (white) | #0f172a | 21:1 ✓ | #12122a | #eee | 18:1 ✓ |
+| Off-diagonal low overlap | rgba(30,96,145,0.3) ≈ #b8d0e8 | #0f172a | ~8:1 ✓ | #12122a | #eee | 18:1 ✓ |
+| Off-diagonal high overlap | rgba(204,86,66,0.7) ≈ #dd836f | #0f172a | ~4.3:1 ✓ | #12122a | #eee | 18:1 ✓ |
+| Diagonal | #f1f5f9 | #94a3b8 | ~3.5:1 (large bold) ✓ | #1a1a36 | #94a3b8 | ~7:1 ✓ |
+| Matrix header | #dbeafe | #1e40af | ~6:1 ✓ | #1a1a36 | #8ab4f8 | ~6.5:1 ✓ |
+
+### Patches in this session
+- P15 (prev session): dark-theme `!important` on all cv-ov-* dark overrides
+- P16 (this session): remove background:#fff !important from td CSS + remove white text JS logic
+- P17 (this session): diagonal dark-mode #555 → #94a3b8
+
+### Install
+```bash
+sudo bash /media/sf_sharedfolderclone/wazuh-fyp-repo/complianceView/install.sh
+```
+Applies P15–P17 to installed `wazuh.chunk.2.js`, rebuilds standalone plugin, restarts dashboard.
+
+---
+
+## 2026-05-01 — Session 3: Dark Theme Missing + Standalone App Removed
+
+### Root Cause Discovery
+
+Inspected the installed `wazuh.chunk.2.js` directly. The injected CSS string was 3091 characters with **zero dark-theme rules**. The theme-detection JS (reading `fyp_theme_v2` from localStorage, listening for `fyp-theme-changed`) was present and correctly adding the `.dark-theme` class to `.cv-ov` — but there was nothing in CSS to respond to it.
+
+Why the dark-theme CSS was never there: P4 first injected the MOUNT_FN when the dark-theme CSS block had not yet been added to the MOUNT_FN source. All subsequent P15 upgrade patches looked for the *old* dark-theme strings to add `!important`, but since those strings never existed in this bundle, all P15 apply calls silently returned `[WARN] anchor not found` — and the dark-theme block remained absent.
+
+Also found: the base (non-dark) CSS still carried old dark-default colors from the original P4 injection for `.cv-ov-hdr` (border `#2a2a4a`), `.cv-ov-title` (`#4fc3f7`), `.cv-ov-sel` (dark bg/text), `.cv-ov-stitle` (`#8ab4f8`, border `#2a2a4a`).
+
+### Bugs Fixed
+
+1. **Native panel dark mode completely non-functional** — dark-theme CSS block was missing entirely. Root `background`, table `td` color, card colors, matrix overrides — all absent.
+2. **Standalone plugin cards white in dark mode** — user requested white card background with black numbers in dark mode (deliberate design choice). Was `#12122a` bg + `#eee` text.
+3. **Base CSS sub-elements had dark-default colors** — header border, title, dropdown, section title all still dark from original P4 injection.
+
+### Fixes Applied
+
+#### P18 — Append dark-theme CSS block to installed bundle
+`patch_bundles.py`: anchors on `.cv-ov-twrap{overflow-x:auto}` (end of CSS string) and appends 21 dark-theme override rules covering root, header, cards, table th/td, matrix. Cards in dark mode: `background:#ffffff !important; color:#0f172a !important` (white card, black numbers — by design).
+
+#### P18b — Fix base CSS sub-elements (4 sub-patches)
+- `cv-ov-hdr` border: `#2a2a4a` → `#e2e8f0`
+- `cv-ov-title` color: `#4fc3f7` → `#2b6cb0`
+- `cv-ov-sel`: dark bg/text → light (`#fff`, `#1a202c`, `#e2e8f0` border)
+- `cv-ov-stitle` color/border: `#8ab4f8`/`#2a2a4a` → `#2b6cb0`/`#e2e8f0`
+
+#### Standalone plugin removed
+`opensearch_dashboards.json`: `"ui": false` — OSD no longer loads the public bundle, so the `/app/complianceView` route is never registered. The server-side plugin (API routes) remains active. The native Wazuh overview tab (`/overview/?tab=compliance-overview`) is the only entry point.
+
+#### Card dark-mode colors (standalone + MOUNT_FN source)
+`public/index.js` + MOUNT_FN: `.cv-root.dark-theme .cv-card` / `.cv-ov.dark-theme .cv-ov-card` → `background:#ffffff !important; border-color:#e2e8f0`. Count: `color:#0f172a !important` (black).
+
+### Install
+```bash
+sudo bash /media/sf_sharedfolderclone/wazuh-fyp-repo/complianceView/install.sh
+```

@@ -23,7 +23,7 @@
 
 ## Abstract
 
-This report documents the design, implementation, and evaluation of an AI-enhanced Security Information and Event Management (SIEM) system developed as a final year project at IBA Karachi. The project augments the open-source Wazuh SIEM platform (version 4.14.3) with five substantive enhancements: (1) a custom compliance ruleset mapped to Pakistan's Prevention of Electronic Crimes Act 2016 (PECA), (2) an AI-driven security analyst chatbot powered by a large language model gateway, (3) an interactive network topology visualisation plugin, (4) a natural language query (NLQ) search interface enabling plain-English alert retrieval, and (5) a comparative cross-framework compliance dashboard. An additional localization layer provides bilingual Urdu/English support and a persistent dark mode across all custom plugins. All components are delivered as OpenSearch Dashboards plugins and are deployable via a single idempotent setup script with feature-flag-controlled selective installation.
+This report documents the design, implementation, and evaluation of an AI-enhanced Security Information and Event Management (SIEM) system developed as a final year project at IBA Karachi. The project augments the open-source Wazuh SIEM platform (version 4.14.3) with six substantive enhancements: (1) a custom compliance ruleset mapped to Pakistan's Prevention of Electronic Crimes Act 2016 (PECA), (2) an AI-driven security analyst chatbot powered by a large language model gateway, (3) an interactive network topology visualisation plugin, (4) a natural language query (NLQ) search interface enabling plain-English alert retrieval, (5) a comparative cross-framework compliance dashboard, and (6) a bilingual Urdu/English localisation layer with comprehensive dark mode support across the entire Wazuh Dashboard. All components are delivered as OpenSearch Dashboards plugins and are deployable via a single idempotent setup script with feature-flag-controlled selective installation.
 
 The project is technically demanding. It required reverse-engineering the internal plugin architecture of a pre-compiled, closed-build-chain dashboard application; directly patching minified, Brotli- and gzip-compressed JavaScript bundles; integrating a multi-service LLM gateway with the OpenSearch ML Commons framework; and reimplementing a Python-based natural language query transpilation pipeline in JavaScript without external dependencies. The challenges encountered, the techniques used to resolve them, and the limitations of the resulting system are documented in full throughout this report.
 
@@ -54,7 +54,7 @@ The project is technically demanding. It required reverse-engineering the intern
 
 Security Information and Event Management systems occupy a critical position in the modern security operations centre (SOC). They aggregate log data from across an organisation's infrastructure, correlate events, and surface alerts that warrant human investigation. Despite the maturity of open-source SIEM platforms such as Wazuh, a significant gap persists between what these systems can detect and what analysts can efficiently act upon. Three barriers are particularly well-documented: the cognitive burden of interpreting high-volume alert streams without natural language tooling, the absence of localised regulatory compliance frameworks tailored to national legislation, and the lack of network-contextual visualisation that maps alerts to their topological origin.
 
-This project addresses these barriers by constructing an AI-enhanced layer on top of Wazuh rather than re-implementing SIEM functionality from scratch. The rationale for this approach is both practical and academically sound: Wazuh provides a production-grade, extensible foundation, and the OpenSearch Dashboards plugin architecture — upon which Wazuh's web interface is built — offers documented extension points. The project contributes enhancements in five distinct areas, each delivered as a self-contained, installable component.
+This project addresses these barriers by constructing an AI-enhanced layer on top of Wazuh rather than re-implementing SIEM functionality from scratch. The rationale for this approach is both practical and academically sound: Wazuh provides a production-grade, extensible foundation, and the OpenSearch Dashboards plugin architecture — upon which Wazuh's web interface is built — offers documented extension points. The project contributes enhancements in six distinct areas, each delivered as a self-contained, installable component.
 
 The secondary motivation for this work is the alignment of security monitoring tooling with Pakistan's regulatory landscape. PECA 2016 is the country's primary legislation governing electronic crimes, yet no open-source SIEM platform ships with PECA-mapped detection rules or compliance dashboards. The absence of such mappings means Pakistani organisations either operate without compliance visibility or rely on costly commercial alternatives. This project directly addresses this gap.
 
@@ -70,7 +70,7 @@ The project set out to achieve the following objectives:
 
 ### 1.2 Scope
 
-The project is scoped to Wazuh 4.14.3 running as an all-in-one deployment (manager, indexer, and dashboard on a single host) on Ubuntu 24.04 LTS or Linux Mint 22. The AI chatbot supports Google Gemini, OpenAI GPT, and AWS Bedrock Claude as interchangeable LLM backends. The NLQ search plugin supports Gemini (cloud) and Ollama (local/offline) backends. All custom plugins target OpenSearch Dashboards 2.19.4.
+The project is scoped to Wazuh 4.14.3 running as an all-in-one deployment (manager, indexer, and dashboard on a single host) on Ubuntu 24.04 LTS or Linux Mint 22. The AI chatbot supports Groq (primary deployed provider, `qwen/qwen3-32b`), Google Gemini, OpenAI GPT, and AWS Bedrock Claude as interchangeable LLM backends. The NLQ search plugin supports Groq, Gemini (cloud), and Ollama (local/offline) backends. All custom plugins target OpenSearch Dashboards 2.19.4.
 
 ---
 
@@ -132,6 +132,8 @@ Browser (Wazuh Dashboard — port 443)
           └── OpenSearch queries → Wazuh Indexer
 ```
 
+> **Current LLM provider**: The gateway runs Groq `qwen/qwen3-32b` as the primary provider. The architecture diagram shows Gemini as one option; Groq is the deployed default and is shown in Section 6.3.2.
+
 ### 3.2 Data Flow — AI Chatbot
 
 1. The analyst submits a question through the Dashboard Assistant chat interface (top-right icon).
@@ -147,7 +149,7 @@ Browser (Wazuh Dashboard — port 443)
 
 1. The analyst types a plain-English security query.
 2. A deterministic time-range pre-processor extracts temporal constraints (e.g., "last 24 hours") before invoking the LLM.
-3. The LLM (Gemini or Ollama) generates a Sec-IR JSON object conforming to the schema.
+3. The LLM (Groq, Gemini, or Ollama) generates a Sec-IR JSON object conforming to the schema.
 4. A schema validator checks the IR; if invalid, a self-correction loop re-invokes the LLM with the error description (up to two retries).
 5. A deterministic transpiler converts the validated IR to an OpenSearch bool query.
 6. The query is executed against `wazuh-alerts-*` and results are displayed in a table.
@@ -165,7 +167,9 @@ Browser (Wazuh Dashboard — port 443)
 | LangChain | 0.3.27 |
 | LangChain MCP Adapters | 0.1.9 |
 | OpenSearch MCP Server (pip) | opensearch-mcp-server-py 0.8.0 |
-| LLM Provider (tested) | Google Gemini (gemini-2.5-flash) |
+| LLM Provider (AI chatbot — primary) | Groq (`qwen/qwen3-32b`) |
+| LLM Provider (AI chatbot — alternates) | Google Gemini (`gemini-2.5-flash`), OpenAI GPT-4o, AWS Bedrock Claude |
+| LLM Provider (NLQ search — primary) | Groq (`llama-3.3-70b-versatile`) |
 
 ---
 
@@ -370,13 +374,14 @@ ChatOpenAI(
 
 The `qwen/qwen3-32b` model was selected for its strong instruction-following and reasoning capability. The provider is selected at runtime via the `LLM_PROVIDER` environment variable (`groq` | `gemini` | `openai` | `claude_bedrock`); switching providers requires only an environment file update and service restart. The system prompt was also updated at this time to improve zero-results handling, add high-severity alert detection, and expand the list of recognised compliance frameworks (SOX, NCA ECC, PDPL, DORA, SOC 2 added alongside the existing PECA, PCI DSS, HIPAA, GDPR, NIST).
 
-The three supported providers are:
+The four supported providers are:
 
-| Provider | `LLM_PROVIDER` value | Model Tested |
-|----------|---------------------|-------------|
-| Google Gemini | `gemini` | `gemini-2.5-flash` |
-| OpenAI | `openai` | `gpt-4o` |
-| AWS Bedrock (Anthropic Claude) | `claude_bedrock` | `anthropic.claude-3-sonnet-20240229-v1:0` |
+| Provider | `LLM_PROVIDER` value | Model Tested | Status |
+|----------|---------------------|-------------|--------|
+| Groq | `groq` | `qwen/qwen3-32b` | **Primary (deployed)** |
+| Google Gemini | `gemini` | `gemini-2.5-flash` | Development / fallback |
+| OpenAI | `openai` | `gpt-4o` | Available |
+| AWS Bedrock (Anthropic Claude) | `claude_bedrock` | `anthropic.claude-3-sonnet-20240229-v1:0` | Available |
 
 #### 6.3.3 Health Endpoint
 
@@ -387,8 +392,8 @@ The `GET /health` endpoint performs live connectivity checks at runtime and retu
   "summary": "All components operational.",
   "status": { "gateway": "ok", "llm": "ok", "mcp": "ok" },
   "details": { "mcp_tools_count": 11 },
-  "provider": "gemini",
-  "model": "gemini-2.5-flash"
+  "provider": "groq",
+  "model": "qwen/qwen3-32b"
 }
 ```
 
@@ -1026,21 +1031,28 @@ Supported `time_range` values: `24h` (default), `7d`, `30d`.
 
 ### 9.5 Native Dashboard Integration via Bundle Patching
 
-The Compliance Overview is integrated into the Wazuh Security Operations sidebar through the same bundle patching mechanism used for the PECA module. The `patch_bundles.py` script applies eight patches across two files:
+The Compliance Overview is integrated into the Wazuh Security Operations sidebar through the same bundle patching mechanism used for the PECA module. The `patch_bundles.py` script applies patches across two files plus a set of upgrade patches for already-installed bundles (P13–P18b):
 
-**`wazuh.chunk.2.js` (six patches):**
-- Catalog map entries for `peca` and `compliance-overview`
-- Agent and overview tab count registrations
-- Injection of `mountComplianceOverview()` (vanilla JS dashboard function), `ComplianceOverviewPanel` (React wrapper), and `peca_data_source_PECADataSource` class
-- `pecaColumns` column definition
-- Module tab definitions for both modules
+**`wazuh.chunk.2.js` (patches P1–P6):**
+- P1: Catalog map entries for `peca` and `compliance-overview`
+- P2–P3: Agent and overview tab count registrations
+- P4: Injection of `mountComplianceOverview()` (vanilla JS dashboard function, ~12 KB single-line), `ComplianceOverviewPanel` (React wrapper), and `peca_data_source_PECADataSource` class
+- P5: `pecaColumns` column definition
+- P6: Module tab definitions for both modules
 
-**`wazuh.plugin.js` (two patches):**
-- `const peca={...}` constant definition at `order:406`
-- `const compliance_overview_app={...}` constant definition at `order:407`
-- Both inserted into the app registration array
+**`wazuh.plugin.js` (patches P7–P12):**
+- P7a: Pre-clean removal of any legacy `peca_app` duplicate from old installs
+- P7b: `const peca={...}` constant definition at `order:406`
+- P7c: `const compliance_overview_app={...}` constant at `order:400.5` (between IT Hygiene and PCI DSS)
+- P8–P9: Both constants inserted into the app registration array
+- P10–P12: Upgrade patches correcting theme CSS and ordering in already-installed bundles
+
+**Upgrade patches for installed bundles (P13–P18b):**
+Applied when the script detects an already-patched bundle that was installed before specific CSS fixes were available. P18 appends a complete dark-theme CSS block when the installed bundle is missing dark-mode styles. P18b sub-patches fix individual sub-element colours. These patches are anchored on unique marker strings; applying them to an already-fixed bundle is a safe no-op.
 
 The script implements idempotency by checking for marker strings before applying each patch, allowing safe re-execution on an already-patched installation. Three install states are handled: fresh install (neither module present), partial install (compliance overview present but PECA absent — the state produced by an earlier defective version of the script), and fully patched.
+
+The plugin has `"ui": false` in its OSD manifest — no public JavaScript bundle is built or served by OSD. The full dashboard UI (`mountComplianceOverview`, CSS, and React wrapper) is injected entirely into the Wazuh bundles by `patch_bundles.py`; the server-side plugin provides only the three API routes.
 
 ---
 
@@ -1048,11 +1060,13 @@ The script implements idempotency by checking for marker strings before applying
 
 ### 10.1 Overview
 
-The Localization plugin (`localization`) injects a persistent floating toolbar into the Wazuh home page, providing dark mode and bilingual Urdu/English support for all three custom FYP plugins (Network Graph, NLQ Search, Compliance View). User preferences are stored in `localStorage` and persist across page reloads and navigation.
+The Localization plugin (`localization`) injects a persistent floating toolbar into every Wazuh Dashboard page, providing bilingual Urdu/English support and dark/light theming for the complete Wazuh Dashboard — including OSD chrome, EUI components, all four custom FYP plugins, and native Wazuh module pages. User preferences are stored in `localStorage` and persist across page reloads and navigation. The plugin was developed across sixteen iterative phases, expanding from an initial 68 strings to a final corpus of **1,012 unique EN→UR mappings** and **187 OSD native i18n keys**.
 
 ### 10.2 Dark Mode
 
-Dark mode is implemented as a CSS injection: toggling the feature appends or removes a `<style id="fyp-dark-mode">` element containing approximately eighty CSS rules targeting EUI class names and OSD chrome selectors. The colour palette targets OSD's structural elements (page background, header, sidebar) while leaving the custom plugins — which already use dark colour schemes by default — largely unchanged.
+Dark mode is implemented as a CSS injection: toggling the feature appends a `<style>` element containing comprehensive CSS rules targeting EUI class names, OSD chrome selectors, and all Wazuh-specific components. The CSS is injected synchronously at module load time (before `setup()` fires) so that the OSD initial loading screen and Wazuh health-check page render in dark mode from the first frame — eliminating any flash of white on initial load.
+
+The dark mode covers not just the page chrome but also the dashboard loading screen (`.osdWelcomeView`), the Wazuh health-check page (`.healthCheck`), all Wazuh module navigation bars (`.wz-menu*`, `.wz-module-header-nav`), and the OSD application mount container. A `fyp-theme-changed` CustomEvent is dispatched on every theme change, enabling other plugins to react in real time.
 
 **Dark mode colour palette:**
 
@@ -1067,30 +1081,56 @@ Dark mode is implemented as a CSS injection: toggling the feature appends or rem
 | Accent | `#3b82f6` |
 | Danger | `#f87171` |
 | Success | `#4ade80` |
+| Warning | `#fb923c` |
+
+The Compliance View plugin reads the `fyp_theme_v2` localStorage key and listens for the `fyp-theme-changed` event to apply its own scoped dark-theme CSS rules (injected into the Wazuh bundle via `patch_bundles.py`).
 
 ### 10.3 Urdu Localisation
 
-The plugin maintains two locale files (`locales/en.json` and `locales/ur.json`) each containing 68 key-value pairs covering strings from all three custom plugins. Both files are bundled into the webpack output at build time.
+The plugin maintains two locale files (`locales/en.json` and `locales/ur.json`) containing **1,012 key-value pairs** covering strings across the complete Wazuh Dashboard UI. Both files are bundled into the webpack output at build time.
 
-**Static translation** is applied via a `TreeWalker` that traverses DOM text nodes and replaces matched strings using pre-built bidirectional `EN_TO_UR` and `UR_TO_EN` maps. A `MutationObserver` on `document.body`, debounced at 150 ms, re-applies the active translation map after any DOM mutation to handle plugin re-renders.
+**Translation architecture (three tracks):**
 
-**Dynamic string translation** is supported for runtime values (e.g., "3 agent(s) – last updated 12:34") via a `_t(key)` / `_tFmt(key, vars)` helper pair exposed through `window.__fypLocale__`. Each plugin calls `_tFmt()` directly when assembling strings that contain runtime data, bypassing the DOM replacement path. Template keys use `{placeholder}` syntax. This mechanism was added to networkGraph (3 dynamic strings), complianceView (1 dynamic string), and nlqSearch (static only — no dynamic strings require translation).
+**Track A — Static DOM replacement:** `_applyReplaceMap(EN_TO_UR)` uses a `TreeWalker` to traverse every text node in `document.body`, replacing exact-trimmed matches from the 561-entry EN→UR map. A `MutationObserver` on `document.body`, debounced at 150 ms, re-applies translations after any DOM mutation to handle React re-renders.
 
-Right-to-left (RTL) layout is activated when Urdu is selected by adding a `fyp-rtl` CSS class to `document.body`. The injected stylesheet applies `direction: rtl` to content areas while preserving the LTR layout of the header and sidebar.
+**Track B — OSD native i18n:** `_ensureLocaleUrl('ur')` adds `?locale=ur-PK` to the URL and reloads. OSD's rendering service then serves the `translations/ur-PK.json` bundle (187 keys) to all React `<FormattedMessage>` components at startup. This covers pagination, EUI components, date pickers, toast notifications, all Wazuh app registration strings (`wz-app-*`), and seven hamburger nav section headers.
 
-The `window.__fypLocale__` API (`{ lang, t(key) }`) is set during the plugin's `setup()` lifecycle phase (not `start()`), ensuring it is available immediately during OSD bootstrap before other plugins' `start()` calls fire. A `fyp-language-changed` window event is dispatched on language switches.
+**Track C — Regex pattern translation:** `_applyPatternTranslations()` runs 49 compiled regex patterns for dynamic strings containing live numbers — pagination ("Showing 1–25 of 1,234"), severity counts ("5 Critical"), relative timestamps ("3 minutes ago"), time ranges ("Last N hours/days"), and agent/alert/event counts.
 
-### 10.4 Toolbar Visibility Implementation
+**Translation coverage — 1,012 unique EN→UR mappings:**
 
-The toolbar is rendered as a `<dialog>` element and activated via `dialog.show()` (non-modal). This choice addresses a layout issue specific to the OSD bootstrap animation: OSD applies a CSS `transform: scaleX()` to `<body>` during its React mount animation. Any `position: fixed` child element under a transformed ancestor loses viewport anchoring and anchors to the transformed element's coordinate space instead. By using a `<dialog>` element, which is promoted to the browser's top layer — a rendering surface that lies above all stacking contexts — the toolbar is immune to this transform behaviour and reliably anchors to the viewport.
+| Namespace | Keys | Coverage |
+|-----------|------|----------|
+| `cfg.*` | 386 | All Management → Configuration field labels (SMTP, SSL, syscheck, rootcheck, cluster, logging, cloud integrations, Osquery, SCA, etc.) |
+| `desc.*` | 44 | Module descriptions and long-form app descriptions |
+| `asst.*` | 33 | AI Assistant chatbot plugin UI strings |
+| `chart.*` | 39 | Chart and visualization titles |
+| `msg.*` | 50 | Status messages, errors, confirmations |
+| `nav.*` | 32 | Sidebar navigation items |
+| `agents.*` | 31 | Agent management page labels and columns |
+| `sec.*` | 33 | Security module pages |
+| `action.*` | 27 | Common action buttons |
+| `ui.*` | 38 | Common UI labels and status strings |
+| `wz.module.*` | 36 | All module card titles |
+| `wz.desc.*` | 28 | Module card descriptions |
+| Other | ~175 | Network Graph, NLQ Search, Compliance View, MITRE, FIM, CA, management, column headers, status labels |
 
-The toolbar is displayed only on the Wazuh home page (`appId === 'wz-home'`), using OSD's `core.application.currentAppId$` RxJS Observable for navigation detection, with a History API intercept fallback.
+**Dynamic string translation** is supported via a `_t(key)` / `_tFmt(key, vars)` helper pair exposed through `window.__fypLocale__`. Each plugin calls `_tFmt()` when assembling strings that contain runtime data (e.g., agent counts, timestamps). A `fyp-language-changed` window event is dispatched on language switches.
 
-### 10.5 Known Limitations
+### 10.4 RTL Layout (Phase 10)
 
-- Dynamic strings assembled from runtime data are handled via `_tFmt()` in plugin code. Strings that are concatenated outside plugin control (e.g., inside third-party OSD components) remain untranslated.
-- Translation is limited to the three custom FYP plugins; OSD's built-in pages (Discover, Dashboards) are not translated.
-- There may be a brief (≤ 150 ms) flash of English text on plugin re-renders before the MutationObserver re-applies the Urdu translation.
+When Urdu is active, a `fyp-rtl` class is added to `<body>` and a comprehensive RTL stylesheet is injected, applying `direction: rtl` to page content areas, tables, badges, flyouts, modal bodies, and breadcrumbs — while keeping the header, collapsible nav, and sidebar in LTR. Accordion arrows are mirrored via `transform: scaleX(-1)`. Input fields, code blocks, and pre elements are explicitly excluded from RTL to preserve their LTR data entry behaviour.
+
+### 10.5 Toolbar Implementation
+
+The toolbar is rendered as a floating pill fixed to the bottom-right corner of every page. It is implemented as a `<dialog>` element activated via `dialog.show()` (non-modal). This choice addresses a layout issue specific to the OSD bootstrap animation: OSD applies a CSS `transform: scaleX()` to `<body>` during its React mount animation. Any `position: fixed` child element under a transformed ancestor loses viewport anchoring. By using a `<dialog>` element — promoted to the browser's top layer — the toolbar is immune to this transform behaviour and reliably anchors to the viewport regardless of OSD animation state.
+
+### 10.6 Known Limitations
+
+- **SVG text nodes**: Chart labels inside `<svg><text>` elements are not reached by the TreeWalker and remain in English.
+- **150 ms flash**: There may be a brief flash of English text on heavy React re-renders before the MutationObserver re-applies translations.
+- **Page reload on language switch**: Every language switch triggers a full page reload (required for OSD native i18n via `?locale=ur-PK`). There is no instant in-page toggle without reload.
+- **Dynamic fragment concatenation**: Strings assembled from translated fragments and data values outside plugin code (e.g., inside third-party OSD components) are not translatable by the DOM text-node replacement approach.
 
 ---
 
@@ -1269,7 +1309,21 @@ Critically, the failure path printed `[WARN]` to stderr and exited 0. `setup.sh`
 
 ---
 
-### 12.12 AI Assistant — OpenSearch Disk Circuit Breaker (AWS EC2)
+### 12.12 Compliance View — Dark Theme Absent from Installed Bundle
+
+**Symptom (2026-05-01):** In dark mode, the Compliance Overview panel retained a white background with all cards, table headers, and container elements in light-mode colours. The localStorage `fyp_theme_v2=dark` key was set, and the `fyp-theme-changed` event was being dispatched correctly, but the panel did not respond.
+
+**Cause (discovered by inspecting installed bundle):** The `mountComplianceOverview` function was injected into `wazuh.chunk.2.js` during an earlier session (P4) before the dark-theme CSS block was authored. The upgrade patches P15a–P15c searched for old anchor strings that never existed in this particular installed bundle variant, so they all exited with `[WARN]` and applied no CSS. The result was a 3,091-character CSS string in the installed bundle with **zero dark-theme rules**, while the theme-detection JavaScript was present and functioning. The dark mode toggle code fired correctly but had no CSS to apply.
+
+This failure mode was invisible in source code review because `patch_bundles.py` was modified after the initial injection, and the source `MOUNT_FN` string was correct. The discrepancy only existed in the on-disk installed file.
+
+**Resolution:** P18 was added: it appends the complete dark-theme CSS block (13 rules covering panel background, header, title, selector, button, section title, cards, count text, table, matrix, load/error/empty states) directly to the installed bundle's CSS string, anchored on a unique substring of the closing CSS injection code. Additionally, four P18b sub-patches corrected base element colours (header border, title colour, dropdown selector, section title) that had retained dark-default values from the original P4 injection — these were rendered invisible in dark mode because their text colour matched the background.
+
+**Lesson:** When patching minified JavaScript bundles, the installed on-disk file must be inspected directly (e.g., by extracting the CSS string with a Python script) to confirm what patches have actually landed. Reading only source files gives a false picture of the installed state.
+
+---
+
+### 12.14 AI Assistant — OpenSearch Disk Circuit Breaker (AWS EC2)
 
 **Symptom (AWS EC2, 2026-04-24):** The AI chat panel returned `CircuitBreakingException: Disk Circuit Breaker is open` on every query, blocking all ML Commons agent execution.
 
@@ -1342,7 +1396,7 @@ _[The following tests are either pending or were not completed at the time of do
 
 **NLQ sequence queries**: The Sec-IR `sequence` pattern emits a `_meta.note` field indicating that Wazuh DSL does not natively support true sequence queries. The generated query approximates the intent using a correlation block but does not enforce event ordering. True sequence detection would require either a custom scoring script or integration with Wazuh's correlation engine.
 
-**Localisation scope**: The Urdu translations cover only the 46 strings present in the three custom FYP plugins. OSD's built-in pages (Discover, Management, Dashboards) are not translated. Dynamic strings assembled at runtime from translated fragments and data values are not translatable by the current DOM text-node replacement approach.
+**Localisation scope**: The Urdu translations cover 1,012 strings across the Wazuh Dashboard UI, including all four custom FYP plugins, all Wazuh module pages, and OSD native i18n via `ur-PK.json` (187 keys). SVG chart labels and dynamic strings assembled from runtime data fragments remain untranslated. The language switch requires a full page reload (necessary for OSD's native React i18n system to re-render in Urdu).
 
 **AI assistant model dependency**: The chatbot depends on a third-party LLM API (Groq, OpenAI, Gemini, or AWS Bedrock). Response quality, latency, and availability are determined by the external provider. The current deployment uses Groq's `qwen/qwen3-32b` model; Groq was adopted as the primary provider after Gemini's free-tier rate limits were reached during testing.
 
@@ -1355,18 +1409,18 @@ _[The following tests are either pending or were not completed at the time of do
 3. **NLQ sequence query support** — explore integration with OpenSearch's Alerting plugin or Wazuh's correlation engine to enable true multi-event sequence detection.
 4. **Performance benchmarking** — measure NLQ translation latency (LLM call + transpilation + execution) under varying query complexity and alert volume.
 5. **Automated testing** — develop a test harness using `wazuh-logtest` for all PECA rules and a mock LLM backend for NLQ pipeline unit tests.
-6. **Urdu translation expansion** — extend the locale files to cover dynamic strings and built-in Wazuh module page text.
+6. **Urdu translation expansion** — extend translations to cover SVG chart label strings (currently unreachable by the TreeWalker) and dynamic strings assembled outside plugin code. Investigate a client-side SVG text replacement approach using a separate `MutationObserver` filtered to `<text>` element mutations.
 7. **AWS deployment hardening** — the EC2 deployment exposed two installation robustness issues: (a) `patch_plugin.py`'s apps-list step previously exited 0 with a `[WARN]` when no string anchor matched the bundle state, silently producing a broken installation; this was fixed by adding a third string anchor, a position-based fallback (locating `ITHygiene` then `].sort(`) that works on any Wazuh 4.14.x bundle variant, and replacing the silent exit with `sys.exit(1)` so `setup.sh` surfaces failures; (b) `install.sh` wrote a blank `WAZUH_API_PASSWORD` when the env var was not pre-exported, preventing Wazuh API calls; this was fixed by auto-resolving the password from `wazuh-install-files.tar` at install time. A remaining improvement is to add pre-deployment patch validation (Node.js `vm.Script` parse check) to the install script to catch JS syntax errors before restarting the dashboard service.
 
 ---
 
 ## 15. Conclusion
 
-This project has successfully delivered a functionally complete AI-enhanced SIEM layer on top of Wazuh 4.14.3, addressing five distinct gaps in the platform's capabilities as they apply to Pakistani security operations. The PECA compliance module provides, for the first time in an open-source SIEM context, a dashboard view of alerts mapped to Pakistan's Prevention of Electronic Crimes Act. The AI chatbot enables natural-language interrogation of live alert data through a production-grade LLM gateway architecture. The network topology plugin contextualises alerts within their infrastructure topology. The NLQ search interface translates plain English into executable OpenSearch queries via a schema-constrained intermediate representation. The comparative compliance view enables simultaneous cross-framework compliance analysis. A localization layer adds Urdu language support and dark mode across all custom components.
+This project has successfully delivered a functionally complete AI-enhanced SIEM layer on top of Wazuh 4.14.3, addressing six distinct gaps in the platform's capabilities as they apply to Pakistani security operations. The PECA compliance module provides, for the first time in an open-source SIEM context, a dashboard view of alerts mapped to Pakistan's Prevention of Electronic Crimes Act. The AI chatbot enables natural-language interrogation of live alert data through a production-grade LLM gateway architecture (currently deployed with Groq `qwen/qwen3-32b`). The network topology plugin contextualises alerts within their infrastructure topology. The NLQ search interface translates plain English into executable OpenSearch queries via a schema-constrained intermediate representation. The comparative compliance view enables simultaneous cross-framework compliance analysis across PCI DSS, HIPAA, GDPR, NIST 800-53, TSC, and PECA. The localization layer adds comprehensive Urdu language support (1,012 translation strings, OSD native i18n, RTL layout) and a full dark mode across the entire Wazuh Dashboard.
 
 The technical difficulty of this project warrants emphasis. The development team operated without access to the Wazuh plugin build toolchain, requiring all custom plugins to be built against OSD's generic bundle system using a standalone webpack configuration. The integration of custom modules into Wazuh's sidebar navigation required systematic reverse-engineering of pre-compiled, minified JavaScript bundles, followed by precise byte-level patching and recompression. The NLQ pipeline required a faithful JavaScript reimplementation of a Python reference codebase, including a zero-dependency schema validator and a deterministic DSL transpiler. Multiple incidents involving corrupted bundles, masked browser caching, and LLM garbage output required methodical diagnosis across multiple layers of the stack.
 
-The resulting system is deployable in full via a single idempotent script on a clean Ubuntu 24.04 LTS or Linux Mint 22 host, has been validated against a clean Wazuh Docker environment, and has been successfully deployed to an AWS EC2 instance. The AWS deployment surfaced and resolved two installation hardening issues — a silent patch failure in the network graph sidebar registration and a blank API credential in the plugin `.env` — both of which have been corrected in the repository so that subsequent deployments via `setup.sh` are fully automated. The AI assistant currently runs on Groq's `qwen/qwen3-32b` model via an OpenAI-compatible endpoint, with Gemini and a local Ollama backend available as fallback providers. The work demonstrates that meaningful intelligence augmentation of an enterprise-grade SIEM platform is achievable within the scope of a final year undergraduate project, even in the presence of significant architectural constraints.
+The resulting system is deployable in full via a single idempotent script on a clean Ubuntu 24.04 LTS or Linux Mint 22 host, has been validated against a clean Wazuh Docker environment, and has been successfully deployed to an AWS EC2 instance. The AWS deployment surfaced and resolved two installation hardening issues — a silent patch failure in the network graph sidebar registration and a blank API credential in the plugin `.env` — both of which have been corrected so that subsequent deployments via `setup.sh` are fully automated. A third class of issue — dark-theme CSS absent from an installed bundle due to silent upgrade-patch failures — was diagnosed by direct inspection of the on-disk compiled file and resolved with a new appended-block patching strategy (P18). The AI assistant currently runs on Groq's `qwen/qwen3-32b` model via an OpenAI-compatible endpoint, with Gemini and a local Ollama backend available as fallback providers. The work demonstrates that meaningful intelligence augmentation of an enterprise-grade SIEM platform is achievable within the scope of a final year undergraduate project, even in the presence of significant architectural constraints.
 
 ---
 
