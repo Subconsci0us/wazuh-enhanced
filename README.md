@@ -9,6 +9,10 @@ This repository contains everything needed to reproduce a final-year project (FY
 3. **AI chatbot assistant** — a natural-language security analyst powered by a large language model (Groq, Google Gemini, OpenAI GPT, or AWS Bedrock Claude). The chatbot is embedded directly in the Wazuh Dashboard and can answer questions like "Analyze the most important alerts in my environment" or "List critical CVEs."
 4. **NLQ Search** — a Wazuh Dashboard plugin that translates plain-English security queries into Wazuh DSL via the Sec-IR intermediate representation pipeline, then executes them directly against the Wazuh Indexer. Supports Groq API (default), Gemini API, and local Ollama backends.
 
+## Demo
+
+🎥 Watch the full project demo here: [Wazuh FYP Demo Video](https://www.youtube.com/watch?v=NhyhEsRKhE8)
+
 ---
 
 ## Architecture
