@@ -960,7 +960,7 @@ install_complianceView() {
     CHUNK2="$WAZUH_PLUGIN/target/public/wazuh.chunk.2.js"
     PLUGIN_JS="$WAZUH_PLUGIN/target/public/wazuh.plugin.js"
 
-    if [ ! -f "$CHUNK2" ] || [ ! -f "$PLUGIN_JS" ]; then
+    if ! _sudo test -f "$CHUNK2" || ! _sudo test -f "$PLUGIN_JS"; then
         error "Wazuh bundle files not found — is Wazuh installed?"
         return 1
     fi
