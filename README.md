@@ -1,4 +1,4 @@
-# Wazuh FYP — SIEM + PECA Compliance + AI Assistant + NLQ Search
+# Enhanced Wazuh — SIEM + PECA Compliance + AI Assistant + NLQ Search
 
 ## Project Overview
 
