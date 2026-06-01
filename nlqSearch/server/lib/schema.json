@@ -55,7 +55,7 @@
             "type":  { "type": "string", "const": "relative" },
             "value": {
               "type": "string",
-              "pattern": "^last_(1h|6h|12h|24h|7d|30d|90d)$"
+              "pattern": "^last_[0-9]+[mhd]$"
             }
           },
           "required": ["type", "value"],
@@ -122,6 +122,131 @@
           }
         }
       ]
+    },
+    "analytics": {
+      "oneOf": [
+        { "type": "null" },
+        {
+          "type": "object",
+          "required": ["source", "operations"],
+          "additionalProperties": false,
+          "properties": {
+            "source": { "type": "string", "minLength": 1 },
+            "sources": {
+              "type": "array",
+              "items": { "type": "string", "minLength": 1 }
+            },
+            "lets": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "required": ["name", "expression"],
+                "additionalProperties": false,
+                "properties": {
+                  "name":       { "type": "string", "minLength": 1 },
+                  "expression": { "type": "string", "minLength": 1 }
+                }
+              }
+            },
+            "operations": {
+              "type": "array",
+              "items": { "$ref": "#/definitions/analytics_operation" }
+            }
+          }
+        }
+      ]
+    }
+  },
+  "definitions": {
+    "analytics_operation": {
+      "type": "object",
+      "required": ["op"],
+      "additionalProperties": false,
+      "properties": {
+        "op": {
+          "type": "string",
+          "enum": [
+            "where", "extend", "summarize", "project", "distinct",
+            "sort", "order", "top", "limit", "take", "search",
+            "join", "render", "mv_expand", "mv-expand"
+          ]
+        },
+        "field":    { "type": "string" },
+        "operator": { "type": "string" },
+        "value": {
+          "anyOf": [
+            { "type": "string" },
+            { "type": "number" },
+            { "type": "integer" },
+            { "type": "boolean" },
+            {
+              "type": "array",
+              "items": {
+                "anyOf": [
+                  { "type": "string" },
+                  { "type": "number" },
+                  { "type": "integer" },
+                  { "type": "boolean" }
+                ]
+              }
+            }
+          ]
+        },
+        "alias":      { "type": "string" },
+        "expression": { "type": "string" },
+        "aggregations": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["function"],
+            "additionalProperties": false,
+            "properties": {
+              "alias":    { "type": "string" },
+              "function": { "type": "string" },
+              "field":    { "type": "string" }
+            }
+          }
+        },
+        "by": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "fields": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "sort": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["field"],
+            "additionalProperties": false,
+            "properties": {
+              "field":     { "type": "string" },
+              "direction": { "type": "string", "enum": ["asc", "desc"] }
+            }
+          }
+        },
+        "count":     { "type": "integer", "minimum": 1 },
+        "direction": { "type": "string", "enum": ["asc", "desc"] },
+        "kind":      { "type": "string" },
+        "title":     { "type": "string" },
+        "chart":     { "type": "string" },
+        "on":        { "type": "string" },
+        "source":    { "type": "string" },
+        "subquery": {
+          "type": "object",
+          "required": ["source", "operations"],
+          "additionalProperties": false,
+          "properties": {
+            "source":     { "type": "string" },
+            "operations": {
+              "type": "array",
+              "items": { "$ref": "#/definitions/analytics_operation" }
+            }
+          }
+        }
+      }
     }
   }
 }

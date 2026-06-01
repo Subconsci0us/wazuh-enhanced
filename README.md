@@ -458,7 +458,7 @@ GROQ_MODEL=llama-3.3-70b-versatile
 # Local Ollama (no API key needed):
 # NLQ_BACKEND=ollama
 # OLLAMA_HOST=http://localhost:11434
-# OLLAMA_MODEL=phi3.5
+# OLLAMA_MODEL=qwen2.5:7b
 ```
 
 Then restart: `sudo systemctl restart wazuh-dashboard`
@@ -500,22 +500,28 @@ The **NLQ Search** plugin (`nlqSearch/`) adds a dedicated search page to the Waz
 
 ### Pipeline
 
+The plugin implements stages 3–7 of the 7-stage Sec-IR research pipeline:
+
 ```
 "Show failed admin logins in the last 24 hours"
         │
-        ▼  time-range pre-processor (deterministic regex)
-        │  [DETECTED TIME WINDOW: use "last_24h" exactly]
-        ▼  LLM call (Gemini / Ollama)
+        ▼  [1] Pre-ambiguity check (research repo)
+        ▼  [2] NLQ annotation / hint injection (research repo)
+        ▼  [3] Time-range pre-processor (deterministic regex)
+        │       → normalises "last 24 hours" → "last_24h"
+        ▼  [4] LLM call (Groq / Gemini / Ollama)
 {
   "sec_ir_version": "1.0",
   "event_type": "authentication_failure",
   "pattern": "single_event",
   "entity": { "user_role": "admin" },
   "severity": "high",
-  "time_range": { "type": "relative", "value": "last_24h" }
+  "time_range": { "type": "relative", "value": "last_24h" },
+  "analytics": null
 }
-        │  schema validation + self-correction (up to 2 retries)
-        ▼  Wazuh DSL transpiler (deterministic)
+        ▼  [5] Schema + capability validation (up to 2 self-correction retries)
+        ▼  [6] Field resolution (entity keys → Wazuh OpenSearch field names)
+        ▼  [7] Wazuh DSL transpiler (deterministic)
 {
   "query": {
     "bool": {
@@ -531,6 +537,9 @@ The **NLQ Search** plugin (`nlqSearch/`) adds a dedicated search page to the Waz
         ▼  executed against wazuh-alerts-* (Wazuh Indexer :9200)
         ▼  results table in browser
 ```
+
+`time_range.value` accepts any `last_<N><m|h|d>` value (e.g. `last_30m`, `last_14d`, `last_90d`).
+The optional `analytics` field enables listing, counting, summarising, and charting queries.
 
 ### Install NLQ Search
 

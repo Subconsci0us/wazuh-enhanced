@@ -55,14 +55,15 @@ const SCHEMA_SUMMARY = `\
 Produce a JSON object that strictly follows this structure:
 
 {
-  "sec_ir_version": "1.0",
-  "event_type": <string>,
-  "pattern": <string>,
-  "entity": { <key>: <value> },
-  "severity": <string>,
-  "time_range": <object>,
-  "aggregation": <object|null>,
-  "correlation": <object|null>
+  "sec_ir_version": "1.0",          // always exactly "1.0"
+  "event_type": <string>,           // one of the 10 values listed below
+  "pattern": <string>,              // one of: single_event | repeated_attempts | spike | sequence | absence
+  "entity": { <key>: <string> },    // zero or more filter keys (see below)
+  "severity": <string>,             // one of: info | low | medium | high | critical | any
+  "time_range": <object>,           // see formats below
+  "aggregation": <object|null>,     // required if pattern is repeated_attempts or spike
+  "correlation": <object|null>,     // required if pattern is sequence
+  "analytics": <object|null>        // optional: use for listing, summarising, or reporting queries
 }
 
 ── event_type — pick exactly one ──────────────────────────────────────────────
@@ -123,7 +124,8 @@ Disambiguation (most-confused pairs):
 ── time_range ──────────────────────────────────────────────────────────────────
 
   Relative: {"type": "relative", "value": "last_24h"}
-    Allowed: last_1h | last_6h | last_12h | last_24h | last_7d | last_30d | last_90d
+    Allowed values use last_<number><unit>, where unit is m (minutes), h (hours), or d (days).
+    Examples: last_1h, last_6h, last_12h, last_24h, last_7d, last_14d, last_30d, last_90d, last_365d.
   Absolute: {"type": "absolute", "start": "<ISO8601>", "end": "<ISO8601>"}
 
 ── aggregation (pattern = repeated_attempts or spike) ──────────────────────────
@@ -134,12 +136,30 @@ Disambiguation (most-confused pairs):
 
   {"events": [{"event_type": "..."}, {"event_type": "..."}], "maxspan": "10m"}
 
+── analytics (optional — use for listing, counting, summarising, or reporting) ──
+
+  {
+    "source": "<Wazuh index or log table name>",
+    "operations": [
+      {"op": "where", "field": "<field>", "operator": "==|!=|>|>=|<|<=|contains|has|in|isnotempty", "value": <value>},
+      {"op": "summarize", "aggregations": [{"alias": "<name>", "function": "count|dcount|max|min|sum", "field": "<field>"}], "by": ["<field>"]},
+      {"op": "project", "fields": ["<field>", "..."]},
+      {"op": "sort", "sort": [{"field": "<field>", "direction": "asc|desc"}]},
+      {"op": "limit", "count": <int>},
+      {"op": "render", "chart": "columnchart|timechart|barchart", "title": "<title>"}
+    ]
+  }
+
+  Use analytics=null for compact detection queries fully represented by event_type/pattern/entity.
+  Use analytics when the query asks for listing, counting, top-N, charts, or summary reports.
+
 ── Rules ───────────────────────────────────────────────────────────────────────
 
   - aggregation: null when pattern is single_event, sequence, or absence.
   - correlation: null unless pattern is sequence.
   - group_by fields must also appear in entity.
   - When no time range is stated, default to last_24h.
+  - analytics: null for detection queries; populate for listing/reporting queries.
 
 ── Pattern selection ───────────────────────────────────────────────────────────
 
@@ -162,11 +182,9 @@ Disambiguation (most-confused pairs):
             deletion alone
   low       single isolated failed login, minor audit finding
   info      absence queries, purely informational lookups with no threat indicator
-  any       investigative/listing queries without a threat level — "show me all X",
-            "list", "find all", "what processes", "which hosts" — when the analyst
-            wants visibility across all severity levels and has not framed the
-            query as a specific threat detection. Use any when the query is about
-            hunting or inventory, not alerting.
+  any       investigative/listing/reporting queries without a threat level —
+            "show me all X", "list", "find all", "count", "top N" — when the
+            analyst wants visibility rather than alerting.
 `;
 
 const FEW_SHOT = `\
@@ -181,7 +199,8 @@ Query: "Alert me on any admin login failures in the last 24 hours"
   "severity": "high",
   "time_range": {"type": "relative", "value": "last_24h"},
   "aggregation": null,
-  "correlation": null
+  "correlation": null,
+  "analytics": null
 }
 
 Query: "Find accounts that failed to log in more than 5 times from the same IP in 24 hours"
@@ -193,7 +212,8 @@ Query: "Find accounts that failed to log in more than 5 times from the same IP i
   "severity": "high",
   "time_range": {"type": "relative", "value": "last_24h"},
   "aggregation": {"threshold": 5, "group_by": ["user", "src_ip"]},
-  "correlation": null
+  "correlation": null,
+  "analytics": null
 }
 
 Query: "Detect a failed login immediately followed by privilege escalation by the same user within 10 minutes"
@@ -211,7 +231,8 @@ Query: "Detect a failed login immediately followed by privilege escalation by th
       {"event_type": "privilege_escalation"}
     ],
     "maxspan": "10m"
-  }
+  },
+  "analytics": null
 }
 
 Query: "Alert when a non-DC machine sends Active Directory replication requests in the last 12 hours"
@@ -223,7 +244,8 @@ Query: "Alert when a non-DC machine sends Active Directory replication requests 
   "severity": "high",
   "time_range": {"type": "relative", "value": "last_12h"},
   "aggregation": null,
-  "correlation": null
+  "correlation": null,
+  "analytics": null
 }
 
 Query: "Detect when vssadmin is used to delete volume shadow copies on any host"
@@ -235,7 +257,8 @@ Query: "Detect when vssadmin is used to delete volume shadow copies on any host"
   "severity": "critical",
   "time_range": {"type": "relative", "value": "last_24h"},
   "aggregation": null,
-  "correlation": null
+  "correlation": null,
+  "analytics": null
 }
 
 Query: "Alert when any host contacts known C2 domains from the threat intel feed in the last 6 hours"
@@ -247,7 +270,8 @@ Query: "Alert when any host contacts known C2 domains from the threat intel feed
   "severity": "high",
   "time_range": {"type": "relative", "value": "last_6h"},
   "aggregation": null,
-  "correlation": null
+  "correlation": null,
+  "analytics": null
 }
 
 Query: "Detect a user who has multiple failed logins followed by a successful login within 5 minutes"
@@ -266,7 +290,8 @@ Query: "Detect a user who has multiple failed logins followed by a successful lo
       {"event_type": "authentication_failure"}
     ],
     "maxspan": "5m"
-  }
+  },
+  "analytics": null
 }
 
 Query: "Show me all processes launched from temporary directories or AppData. Include the process name, username, full command line, and timestamp."
@@ -278,7 +303,8 @@ Query: "Show me all processes launched from temporary directories or AppData. In
   "severity": "any",
   "time_range": {"type": "relative", "value": "last_24h"},
   "aggregation": null,
-  "correlation": null
+  "correlation": null,
+  "analytics": null
 }
 
 Query: "Find powershell processes launched by Office applications in the last 7 days"
@@ -290,7 +316,49 @@ Query: "Find powershell processes launched by Office applications in the last 7 
   "severity": "high",
   "time_range": {"type": "relative", "value": "last_7d"},
   "aggregation": null,
-  "correlation": null
+  "correlation": null,
+  "analytics": null
+}
+
+Query: "Show top 10 source IPs with the most authentication failures in the last 30 days"
+{
+  "sec_ir_version": "1.0",
+  "event_type": "authentication_failure",
+  "pattern": "repeated_attempts",
+  "entity": {"src_ip": "*"},
+  "severity": "any",
+  "time_range": {"type": "relative", "value": "last_30d"},
+  "aggregation": {"threshold": 1, "group_by": ["src_ip"]},
+  "correlation": null,
+  "analytics": {
+    "source": "wazuh-alerts-*",
+    "operations": [
+      {"op": "where", "field": "rule.groups", "operator": "contains", "value": "authentication_failed"},
+      {"op": "summarize", "aggregations": [{"alias": "count", "function": "count", "field": "_id"}], "by": ["data.srcip"]},
+      {"op": "sort", "sort": [{"field": "count", "direction": "desc"}]},
+      {"op": "limit", "count": 10}
+    ]
+  }
+}
+
+Query: "Count alerts by rule level for the last 7 days and show as a chart"
+{
+  "sec_ir_version": "1.0",
+  "event_type": "policy_violation",
+  "pattern": "single_event",
+  "entity": {},
+  "severity": "any",
+  "time_range": {"type": "relative", "value": "last_7d"},
+  "aggregation": null,
+  "correlation": null,
+  "analytics": {
+    "source": "wazuh-alerts-*",
+    "operations": [
+      {"op": "summarize", "aggregations": [{"alias": "count", "function": "count", "field": "_id"}], "by": ["rule.level"]},
+      {"op": "sort", "sort": [{"field": "rule.level", "direction": "asc"}]},
+      {"op": "render", "chart": "columnchart", "title": "Alerts by Rule Level"}
+    ]
+  }
 }
 `;
 
@@ -299,9 +367,14 @@ You are a security-query IR generator. Given a plain-English security query
 from a SOC analyst, you output ONLY a JSON object — no explanation, no markdown
 fences, no extra text.
 
-If the input is NOT a security detection query (e.g. greetings, general questions,
-requests for explanations, nonsense), output exactly this and nothing else:
+If the input is NOT a security query at all (e.g. greetings, weather questions,
+requests for code explanations, nonsense unrelated to security), output exactly
+this and nothing else:
 {"error": "not_a_security_query"}
+
+Do NOT output that error for: alert listings, log summaries, count queries,
+top-N reports, chart requests, aggregation or trend analysis — those are valid
+security analytics queries. Use analytics in the IR for those cases.
 
 ${SCHEMA_SUMMARY}
 
@@ -325,8 +398,10 @@ const TR_CANONICAL = [
   [12,   'last_12h'],
   [24,   'last_24h'],
   [168,  'last_7d'],
+  [336,  'last_14d'],
   [720,  'last_30d'],
   [2160, 'last_90d'],
+  [8760, 'last_365d'],
 ];
 
 const TR_PATTERN = new RegExp(
@@ -372,7 +447,10 @@ function buildCorrectionPrompt(query, badJson, errors) {
     `Fix ONLY the listed fields and return the corrected JSON with no other text.\n\n` +
     `Original query: ${query}\n\n` +
     `Previous JSON:\n${badJson}\n\n` +
-    `Errors:\n${errorLines}`
+    `Errors:\n${errorLines}\n\n` +
+    `If the previous JSON said not_a_security_query for a listing, counting, ` +
+    `aggregation, or reporting request, that classification was wrong. Return a ` +
+    `complete valid Sec-IR object, using analytics when needed.`
   );
 }
 

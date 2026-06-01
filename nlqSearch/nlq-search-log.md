@@ -843,3 +843,41 @@ No code changes to this plugin. The following previously missing strings were ad
 The MutationObserver in the localization plugin will catch `textContent` assignments for these strings (button busy/ready cycles, status line updates) and replace them with Urdu within 150 ms.
 
 **Rebuild required:** `sudo bash install.sh` (for the localization plugin bundle, which contains the updated locale JSON)
+
+---
+
+## 2026-06-01 — Sec-IR upstream sync (GitHub main pull)
+
+### What was pulled from sec-ir GitHub main
+
+Pulled latest from https://github.com/yaxsq/sec-ir (main branch). The local copy had 5 commits behind remote. Changes included:
+
+- **Upgraded 7-stage pipeline architecture** with new modules: `ambiguity.py`, `capability_validator.py`, `field_resolver.py`, `platform_pipeline.py`, `sentinel_nlq_hints.py`, `sentinel_nlq_refiners.py`, `sentinel_translation.py`
+- **New transpilers**: `transpiler/sentinel.py` (Sec-IR → Sentinel KQL), `transpiler/analytics_bridge.py` (analytics IR → KQL bridge for Elastic/Splunk/Wazuh)
+- **Schema updated**: `time_range.value` pattern changed from fixed enum to flexible `^last_[0-9]+[mhd]$`; `analytics` optional field added
+- **Parser updated**: analytics/Sentinel system prompt added; `prompt_hints` parameter; `num_predict` 2048 → 800; `keep_alive: "1h"` for Ollama
+- **Sentinel evaluation dataset**: `eval_dataset/Sentinel_Evaluation.jsonl` (197 native Sentinel NLQ + KQL baselines); `sentinel_translated.jsonl`
+- **Benchmark results**: 0.85 avg KQL closeness on Sentinel native benchmark after refine/transpile improvements
+- **Recommended model updated**: `qwen2.5:7b` replaces `gemma4:e4b` for the upgraded pipeline (better analytics/Sentinel accuracy)
+
+### Files updated in nlqSearch
+
+1. `server/lib/schema.json` — Updated `time_range.value` pattern to `^last_[0-9]+[mhd]$`; added `analytics` field with full operations schema; kept `process_path` and `command_line` entity keys (Wazuh-specific)
+2. `server/lib/validator.js` — Replaced `VALID_TIME_RELATIVE` fixed Set with regex `/^last_[0-9]+[mhd]$/`; added `analytics` field validation
+3. `server/lib/transpiler.js` — `timeFilter()` now uses dynamic `"now-" + value.slice(5)` instead of fixed `RELATIVE_OFFSETS` map; supports any `last_<n><m|h|d>` value
+4. `server/routes/index.js` — Updated `SCHEMA_SUMMARY` with `analytics` field, flexible time_range docs, analytics operations spec; updated `FEW_SHOT` to add `analytics: null` to all examples + 2 analytics examples; updated `SYSTEM_PROMPT` to not reject analytics queries; updated `TR_CANONICAL` with `last_14d` and `last_365d`; updated correction prompt with analytics sentinel note
+5. `install.sh` — Updated default `OLLAMA_MODEL` from `phi3.5` to `qwen2.5:7b`
+6. `README.md` — Updated pipeline, schema, model recommendations
+
+### Files updated in wazuh-fyp-repo
+
+7. `setup.sh` — Added `OLLAMA_HOST` and `OLLAMA_MODEL` forwarding in `install_nlqSearch()`; updated Ollama warning message
+8. `README.md` — Updated NLQ Search section
+9. `FYP_Report.md` — Updated section 8 with upgraded pipeline, analytics field, Sentinel benchmark, new modules
+
+### Status
+
+- Code changes: complete, untested (requires dashboard restart in VM)
+- Documentation: updated
+- The analytics field in schema/validator/routes is additive — existing detection queries unchanged
+- The flexible time_range change is backward-compatible (all old values like `last_24h` still match `^last_[0-9]+[mhd]$`)

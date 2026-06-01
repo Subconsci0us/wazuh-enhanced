@@ -906,6 +906,8 @@ install_nlqSearch() {
     export GROQ_MODEL="${GROQ_MODEL:-llama-3.3-70b-versatile}"
     export GEMINI_API_KEY="${GEMINI_API_KEY:-}"
     export NLQ_BACKEND="${NLQ_BACKEND:-}"
+    export OLLAMA_HOST="${OLLAMA_HOST:-http://localhost:11434}"
+    export OLLAMA_MODEL="${OLLAMA_MODEL:-qwen2.5:7b}"
 
     info "Running nlqSearch/install.sh …"
     (cd "$NLQ_DIR" && _sudo bash install.sh ${_NORESTART}) \
@@ -915,6 +917,9 @@ install_nlqSearch() {
         echo ""
         warn "No LLM API key is set. To enable the Groq backend for NLQ Search (recommended):"
         warn "  export GROQ_API_KEY=gsk_xxxx && sudo -E bash setup.sh --only nlqSearch"
+        warn "Or use Ollama (offline, no API key — requires qwen2.5:7b pulled locally):"
+        warn "  export NLQ_BACKEND=ollama OLLAMA_MODEL=qwen2.5:7b"
+        warn "  sudo -E bash setup.sh --only nlqSearch"
         warn "Or edit the installed config directly:"
         warn "  sudo nano /usr/share/wazuh-dashboard/plugins/nlqSearch/server/.env"
         warn "  Set: GROQ_API_KEY=gsk_xxxx  NLQ_BACKEND=groq"

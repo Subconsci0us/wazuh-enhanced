@@ -653,19 +653,38 @@ The pipeline was subsequently integrated into the Wazuh Dashboard as the `nlqSea
 
 Direct LLM-to-query approaches suffer from three well-documented problems. First, LLMs frequently emit syntactically invalid query syntax, particularly for domain-specific languages like Elastic EQL or OpenSearch DSL. Second, a query emitted directly for one platform cannot be translated to another without a second LLM call. Third, there is no natural audit or edit point between the analyst's intent and the executed query.
 
-Sec-IR resolves all three by inserting a schema-constrained JSON object as the sole output of the LLM call:
+Sec-IR resolves all three by inserting a schema-constrained JSON object as the sole output of the LLM call.
+
+The upgraded pipeline in the `sec-ir` research repo is a **7-stage architecture**. Stages 1–2 are research-side pre-processing; the `nlqSearch` production plugin implements stages 3–7.
 
 ```
-Plain English query
-    │
-    ▼  Deterministic time-range pre-processor (regex, no LLM)
-Annotated query  ←── explicit time window injected if found
-    │
-    ▼  One LLM call (Gemini or local Ollama)
-Sec-IR JSON  ←── schema-validated, human-editable
-    │
-    ▼  Deterministic transpiler (pure Python/JS, no LLM)
-Platform queries  →  Elastic EQL | Splunk SPL | Wazuh DSL
+[RESEARCH REPO — sec-ir]
+Stage 1  Pre-ambiguity detection (ambiguity.py)
+         │  rule-based: boolean scope, vague numbers, time boundaries,
+         │  implicit negation — unresolvable queries halt with clarification
+         ▼
+Stage 2  Annotation normaliser
+         │  compact single-turn prompt hints built from stage 1 output
+         ▼
+
+[PRODUCTION PLUGIN — nlqSearch  (stages 3–7)]
+Stage 3  LLM call (parser.py / routes/index.js)
+         │  accepts prompt_hints; time-range pre-processor runs first (regex)
+         │  One LLM call → Sec-IR JSON  ←── schema-validated, human-editable
+         ▼
+Stage 4  Schema validation (validator.py / validator.js)
+         │  errors → self-correction loop (up to 2 retries)
+         ▼
+Stage 5  Capability validation (capability_validator.py)
+         │  per-backend matrix: event types, patterns, time ranges, aggregations
+         ▼
+Stage 6  Fuzzy field resolution (field_resolver.py)
+         │  deterministic fuzzy mapping with scored ranking
+         ▼
+Stage 7  Deterministic transpile (transpiler/*.py / transpiler.js)
+         │  no LLM involvement
+         ▼
+Platform queries  →  Elastic EQL | Splunk SPL | Wazuh DSL | Sentinel KQL
 ```
 
 Query correctness is enforced by code, not by the LLM. The LLM's responsibility is reduced to classifying the analyst's intent into a small, well-defined structure. A downstream transpiler — with no LLM involvement — converts that structure into syntactically correct platform queries. Adding a new target platform requires writing one new transpiler file; nothing upstream changes.
@@ -674,18 +693,19 @@ Query correctness is enforced by code, not by the LLM. The LLM's responsibility 
 
 ### 8.3 The Sec-IR Schema
 
-The Sec-IR schema (JSON Schema Draft-07) defines eight fields:
+The Sec-IR schema (JSON Schema Draft-07) defines nine fields (eight required, one optional added in the upgraded pipeline):
 
 | Field | Type | Description |
 |-------|------|-------------|
 | `sec_ir_version` | string | Schema version (`"1.0"`) |
 | `event_type` | enum (10 values) | Security event category |
 | `pattern` | enum (5 values) | Query structure / detection pattern |
-| `entity` | object | Field bindings (user, src\_ip, host, process, user\_role) |
+| `entity` | object | Field bindings (user, src\_ip, host, process, user\_role, and Wazuh-specific extensions `process_path`, `command_line`) |
 | `severity` | enum (6 values) | Alert severity filter |
-| `time_range` | oneOf (relative \| absolute) | Temporal scope |
+| `time_range` | oneOf (relative \| absolute) | Temporal scope. Relative values accept any flexible `last_<n><m\|h\|d>` (e.g. `last_14d`, `last_365d`, `last_90m`). |
 | `aggregation` | nullable object | Threshold + grouping (for repeated\_attempts, spike) |
 | `correlation` | nullable object | Event sequence definition (for sequence pattern) |
+| `analytics` | optional object | SIEM analytics plan for listing/reporting/summarisation/chart queries. Contains `source` (table/index name) and `operations` (where, summarize, project, sort, limit, render, etc.). `null` for detection queries. |
 
 **Event type taxonomy (ten categories across five domains):**
 
@@ -716,6 +736,10 @@ The Sec-IR schema (JSON Schema Draft-07) defines eight fields:
 | `src_ip` | `source.ip` | `src_ip` | `data.srcip` |
 | `host` | `host.hostname` | `host` | `agent.name` |
 | `process` | `process.name` | `process` | `data.win.eventdata.image` |
+| `process_path` | `process.executable` | `process_path` | `data.win.eventdata.image` _(Wazuh extension)_ |
+| `command_line` | `process.command_line` | `command_line` | `data.win.eventdata.commandLine` _(Wazuh extension)_ |
+
+`process_path` and `command_line` are Wazuh-specific entity key extensions added to support Windows process telemetry fields that are frequently referenced in security detection rules but absent from the base five entity keys.
 
 **Severity mapping to Wazuh rule levels:**
 
@@ -754,6 +778,22 @@ The parser supports two backends:
 A deterministic regex pre-processor (`_extract_time_range`) scans the query for temporal expressions before the LLM call. Recognised patterns include "in the last N hours", "past N days", "over the last N weeks", "for more than N minutes". When a match is found, a `[DETECTED TIME WINDOW: use time_range value "last_Xh" exactly]` hint is injected into the prompt. Snap strategy is ceiling (round up): under-approximating a security time window silently drops events, which is a worse failure mode than over-querying. The "within N minutes" phrasing is intentionally excluded — it specifies a sequence `maxspan`, not a lookback window.
 
 This pre-processor was added in parser version 4 after post-eval manual testing revealed that the LLM defaulted to `last_24h` for any non-standard time window (e.g., "more than 1 hour", "in the past 30 minutes"), because the few-shot examples only demonstrated canonical values.
+
+#### 8.4.6 Upgraded Pipeline Components (Research Repo)
+
+The following modules were added to the `sec-ir` research repository as part of the pipeline upgrade to the 7-stage architecture. They are not shipped inside the `nlqSearch` OSD plugin but are available for pre-processing before the plugin is invoked, or for multi-platform evaluation use.
+
+**`ambiguity.py`** — Rule-based pre-ambiguity detection (Stage 1). Checks for boolean scope ambiguity ("logins or scans from admin" — two events or one?), vague numeric thresholds ("many", "a lot"), unresolvable time boundaries ("last shift", "over the weekend"), and implicit negation without clear scope. Queries that cannot be resolved deterministically halt with a structured clarification prompt rather than proceeding to the LLM with an underspecified input.
+
+**`capability_validator.py`** — Per-backend capability matrix (Stage 5). Validates that the Sec-IR object's event type, pattern, time range, and aggregation fields are supported by the target backend before transpilation is attempted. Returns a structured capability gap report if the IR requests a feature not available for the chosen backend (e.g., native sequence queries on Wazuh DSL).
+
+**`field_resolver.py`** — Deterministic fuzzy field mapping (Stage 6). Maps free-form entity field references to canonical platform field names using scored fuzzy matching. Returns a ranked list of candidate mappings with confidence scores, enabling the transpiler to choose the highest-ranked field without LLM involvement.
+
+**`transpiler/sentinel.py`** — Sec-IR → Microsoft Sentinel KQL transpiler. Converts validated Sec-IR objects into Sentinel KQL queries. Evaluated on 197 native Sentinel NLQs; achieved 0.85 average KQL closeness after refiner improvements.
+
+**`transpiler/analytics_bridge.py`** — Analytics IR → KQL bridge. Converts the `analytics` field of a Sec-IR object into a KQL analytics query (summarize, project, sort, render operations) for Elastic, Splunk, and Sentinel targets.
+
+Supporting modules also added: `schema_registration.py` (optional schema cache from SIEM metadata), `platform_pipeline.py` (analytics gating and backend hints), `sentinel_nlq_hints.py` (analytics prompt hints from NLQ keywords), `sentinel_nlq_refiners.py` (post-parse IR patches for Sentinel accuracy), `sentinel_translation.py` (Sentinel KQL → Elastic/Splunk/Wazuh best-effort cross-platform translation).
 
 ---
 
@@ -808,7 +848,7 @@ The evaluation harness (`eval_harness.py`) runs each NLQ string through the pars
 
 ---
 
-### 8.7 Model Comparison — phi3.5 vs. gemma4:e4b
+### 8.7 Model Comparison — phi3.5 vs. gemma4:e4b vs. qwen2.5:7b
 
 The first full evaluation run compared two locally-runnable models on the complete 240-NLQ dataset via an SSH-tunnelled remote GPU (Tailscale, NVIDIA):
 
@@ -821,7 +861,15 @@ The first full evaluation run compared two locally-runnable models on the comple
 | Avg correction rounds | 0.61 | 0.12 | −0.49 |
 | Avg inference time | ~3.74 s | ~8.87 s | +5.1 s |
 
-gemma4:e4b outperforms phi3.5 on every accuracy metric, with dramatically fewer correction rounds. phi3.5 is preferable only when latency is the primary constraint and accuracy is secondary. gemma4:e4b was selected as the primary model for all subsequent evaluation and prompt tuning.
+gemma4:e4b outperforms phi3.5 on every accuracy metric, with dramatically fewer correction rounds. phi3.5 is preferable only when latency is the primary constraint and accuracy is secondary. gemma4:e4b was selected as the primary model for all subsequent evaluation and prompt tuning on the classic detection-only query dataset.
+
+**Upgraded pipeline — model update (2026-06):** Following the addition of Sentinel KQL support, analytics queries, and the 7-stage pipeline, `qwen2.5:7b` is now the recommended Ollama model for the full upgraded pipeline. Evaluation on the Sentinel-native benchmark (197 NLQs) and analytics query set showed `qwen2.5:7b` producing superior KQL output and more accurate `analytics` field population than `gemma4:e4b`. `gemma4:e4b` remains the stronger model for classic detection-only queries (the original 240-NLQ dataset). The recommended model choice therefore depends on the query workload:
+
+| Use case | Recommended model |
+|----------|-----------------|
+| Classic detection queries (auth failure, lateral movement, etc.) | `gemma4:e4b` |
+| Sentinel KQL, analytics/reporting queries, full 7-stage pipeline | `qwen2.5:7b` |
+| Minimal resource footprint, latency-critical | `phi3.5` |
 
 ---
 
@@ -917,6 +965,19 @@ The recommended configuration — gemma4:e4b on a GPU via Ollama, prompt v3, v2-
 | event\_type | 76.1% |
 | severity | 69.7% |
 
+**Sentinel KQL benchmark (upgraded pipeline, qwen2.5:7b):**
+
+A separate evaluation was conducted on a new Sentinel-native benchmark dataset (`eval_dataset/Sentinel_Evaluation.jsonl`) consisting of 197 NLQ + native KQL baseline pairs sourced from Microsoft Sentinel documentation and detection scenarios. This benchmark measures KQL output closeness (a continuous 0–1 similarity metric) rather than field-level IR accuracy.
+
+| Metric | Score |
+|--------|-------|
+| Dataset size | 197 NLQ + KQL pairs |
+| Avg KQL closeness (before refiner improvements) | 0.62 |
+| Avg KQL closeness (after `sentinel_nlq_refiners.py` + upgraded transpiler) | **0.85** |
+| Model | qwen2.5:7b (Ollama) |
+
+The 0.85 average closeness reflects the contribution of both the Sentinel-specific system prompt hints (`sentinel_nlq_hints.py`) and the post-parse IR patches (`sentinel_nlq_refiners.py`) that correct known Sentinel-specific IR translation gaps before transpilation. The Sentinel transpiler and benchmark are research-repo components; the `nlqSearch` plugin targets Wazuh DSL / OpenSearch.
+
 ---
 
 ### 8.11 Metric Interpretation
@@ -961,9 +1022,11 @@ Among the 27 catastrophic (≤4/7) queries, `event_type` errors are the primary 
 
 The complete Sec-IR pipeline was integrated into the `nlqSearch` OpenSearch Dashboards plugin. The server-side component reimplements the Python parser, validator, and Wazuh transpiler in JavaScript (Node.js 18), preserving identical field mappings, schema constraints, and self-correction logic. The reimplementation was necessary because OSD's server-side plugin environment runs in Node.js, and the Python dependencies (`jsonschema`, `google-genai`) cannot be loaded directly.
 
+The plugin schema, validator, and transpiler have been updated to handle the upgraded Sec-IR schema. The `analytics` field is recognised and validated by `validator.js`; when present in the IR, the transpiler passes it through in the response alongside the Wazuh DSL query. The flexible `time_range.value` pattern (`^last_[0-9]+[mhd]$`) replaces the previous fixed set, and `transpiler.js` generates the correct OpenSearch date math dynamically (e.g., `last_14d` → `now-14d`) without a lookup table. These changes are fully backward-compatible: existing detection queries with values like `last_24h` continue to work without modification.
+
 The plugin exposes two analyst interfaces:
 
-**Standalone page (`/app/nlqSearch`):** A full-featured query builder with an editable Sec-IR JSON panel (allowing analysts to inspect and modify the IR before execution), a raw DSL display, a re-transpile button (regenerates DSL from a modified IR without a second LLM call), and a results table.
+**Standalone page (`/app/nlqSearch`):** A full-featured query builder with an editable Sec-IR JSON panel (allowing analysts to inspect and modify the IR before execution), a raw DSL display, a re-transpile button (regenerates DSL from a modified IR without a second LLM call), and a results table. When the IR contains an `analytics` field, it is displayed in the JSON panel alongside the detection query fields.
 
 **Global EN toggle:** An "EN" button injected adjacent to the "DQL" language selector on every Wazuh module page (Security Events, GDPR, Malware Detection, Vulnerability, etc.). When active, pressing Enter in the search bar triggers NLQ translation and auto-submits the resulting DQL string. The existing time-picker on each module page is preserved — the translation pipeline omits the time range from the DQL string, deferring to the page's own temporal filter.
 
@@ -985,7 +1048,7 @@ The plugin exposes two analyst interfaces:
 | `GEMINI_API_KEY` | _(required for gemini)_ | Google AI Studio API key |
 | `GEMINI_MODEL` | `gemini-2.5-flash` | Gemini model name |
 | `OLLAMA_HOST` | `http://localhost:11434` | Ollama server URL (for offline operation) |
-| `OLLAMA_MODEL` | `phi3.5` | Ollama model name |
+| `OLLAMA_MODEL` | `qwen2.5:7b` | Ollama model name (recommended for full pipeline; `gemma4:e4b` for detection-only) |
 | `INDEXER_PASSWORD` | _(required)_ | Wazuh Indexer admin password |
 
 Auto-detection: when `NLQ_BACKEND` is not explicitly set, the plugin selects the backend by key presence: Groq → Gemini → Ollama. Groq was added as the preferred default in April 2026 to avoid Gemini free-tier rate limits.

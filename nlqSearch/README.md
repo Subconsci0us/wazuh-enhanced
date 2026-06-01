@@ -39,6 +39,41 @@ The dedicated page at `/app/nlqSearch` (accessible from the **Explore** section 
 
 ## How the Pipeline Works
 
+The upstream `sec-ir` research repo implements a **7-stage pipeline**. This plugin implements stages 3–7 (the production path); stages 1–2 are research-side pre-processing that can optionally be called before forwarding to the plugin.
+
+**Full 7-stage research pipeline (sec-ir repo):**
+
+```
+Stage 1 — Pre-ambiguity detection (ambiguity.py)
+        │  rule-based checks: boolean scope, vague numbers, time boundaries,
+        │  implicit negation — unresolvable queries halt with clarification prompts
+        ▼
+Stage 2 — Annotation normaliser
+        │  compact single-turn prompt hints injected into the query
+        ▼
+Stage 3 — LLM call (parser.py)  ← plugin starts here
+        │  accepts prompt_hints; produces Sec-IR JSON
+        ▼
+Stage 4 — Schema validation (validator.py / validator.js)
+        │  errors → self-correction loop (up to 2 retries)
+        ▼
+Stage 5 — Capability validation (capability_validator.py)
+        │  per-backend matrix: event types, patterns, time ranges, aggregations
+        ▼
+Stage 6 — Fuzzy field resolution (field_resolver.py)
+        │  deterministic fuzzy mapping with scored ranking
+        ▼
+Stage 7 — Deterministic transpile (transpiler/*.py / transpiler.js)
+        │  Elastic EQL | Splunk SPL | Wazuh DSL | Sentinel KQL
+        ▼
+Wazuh Indexer (wazuh-alerts-*)  ← plugin continues here
+        │  returns matching alerts
+        ▼
+Results table in the dashboard
+```
+
+**Plugin pipeline (stages 3–7, what this plugin runs):**
+
 ```
 Plain English query
         │
@@ -76,9 +111,16 @@ Example IR for *"Show failed admin logins in the last 24 hours"*:
   "severity": "high",
   "time_range": { "type": "relative", "value": "last_24h" },
   "aggregation": null,
-  "correlation": null
+  "correlation": null,
+  "analytics": null
 }
 ```
+
+### Schema Notes (v1.1 — upgraded pipeline)
+
+- **`time_range.value`** now accepts any flexible `last_<n><m|h|d>` value (e.g. `last_14d`, `last_365d`, `last_90m`). All previously used values like `last_24h` still match.
+- **`analytics`** is a new optional field for listing, reporting, summarisation, and chart queries. It contains `source` (table/index name) and `operations` (where, summarize, project, sort, limit, render, etc.). For detection queries it is `null`.
+- **`entity.process_path`** and **`entity.command_line`** are Wazuh-specific extensions beyond the base five entity keys.
 
 ---
 
@@ -202,7 +244,7 @@ Edit `/usr/share/wazuh-dashboard/plugins/nlqSearch/server/.env` after installati
 | `GEMINI_API_KEY` | _(required for Gemini)_ | Google AI Studio API key |
 | `GEMINI_MODEL` | `gemini-2.5-flash` | Gemini model to use |
 | `OLLAMA_HOST` | `http://localhost:11434` | Ollama server URL |
-| `OLLAMA_MODEL` | `phi3.5` | Ollama model (must be pulled: `ollama pull phi3.5`) |
+| `OLLAMA_MODEL` | `qwen2.5:7b` | Ollama model (must be pulled: `ollama pull qwen2.5:7b`) |
 | `INDEXER_HOST` | `localhost` | Wazuh Indexer host |
 | `INDEXER_PORT` | `9200` | Wazuh Indexer port |
 | `INDEXER_USER` | `admin` | Indexer username |
@@ -322,16 +364,29 @@ GEMINI_MODEL=gemini-2.5-flash
 ### Ollama (fully offline, no API key required)
 
 1. Install Ollama: https://ollama.com
-2. Pull a model: `ollama pull phi3.5` (or `qwen3:4b`, `mistral`, etc.)
+2. Pull a model: `ollama pull qwen2.5:7b` (recommended — best Sentinel/analytics accuracy; or `mistral`, `phi3.5`, etc.)
 3. Edit `/usr/share/wazuh-dashboard/plugins/nlqSearch/server/.env`:
    ```
    NLQ_BACKEND=ollama
    OLLAMA_HOST=http://localhost:11434
-   OLLAMA_MODEL=phi3.5
+   OLLAMA_MODEL=qwen2.5:7b
    ```
 4. Restart the dashboard.
 
 After any `.env` change, restart: `sudo systemctl restart wazuh-dashboard`
+
+---
+
+## Sentinel KQL and Analytics — Research Results
+
+The upstream `sec-ir` research repo has been extended with Sentinel KQL support and analytics query handling. Key findings from the upgraded pipeline:
+
+- **Sentinel KQL transpiler** (`transpiler/sentinel.py`): Sec-IR → Sentinel KQL. An `analytics_bridge.py` module handles analytics IR → KQL for listing/reporting queries.
+- **Sentinel benchmark**: 0.85 average KQL closeness on 197 native Sentinel NLQ + KQL baselines (up from 0.62 before the refiner/transpiler improvements). Dataset: `eval_dataset/Sentinel_Evaluation.jsonl`.
+- **Recommended Ollama model**: `qwen2.5:7b` replaces `gemma4:e4b` as the top recommendation for the upgraded pipeline (better Sentinel KQL and analytics query accuracy). `gemma4:e4b` remains strong for classic detection-only queries.
+- **Full pipeline evaluation** adds gate metrics: pre-ambiguity pass rate, capability validation pass rate, field-resolution pass rate (in addition to the existing field-level accuracy metrics).
+
+The `nlqSearch` plugin implements stages 3–7 of this pipeline. The Sentinel transpiler is research-side only (the plugin targets Wazuh DSL / OpenSearch). The `analytics` IR field is passed through the plugin pipeline when present.
 
 ---
 

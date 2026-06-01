@@ -50,19 +50,14 @@ const SEVERITY_LEVEL = {
 
 // ── Time-range helper ─────────────────────────────────────────────────────────
 
-const RELATIVE_OFFSETS = {
-  last_1h:  'now-1h',
-  last_6h:  'now-6h',
-  last_12h: 'now-12h',
-  last_24h: 'now-24h',
-  last_7d:  'now-7d',
-  last_30d: 'now-30d',
-  last_90d: 'now-90d',
-};
-
 function timeFilter(timeRange) {
   if (timeRange.type === 'relative') {
-    const gte = RELATIVE_OFFSETS[timeRange.value] || 'now-24h';
+    // Schema accepts last_<number><m|h|d> — strip prefix and emit as OpenSearch offset.
+    const value = timeRange.value || 'last_24h';
+    if (!value.startsWith('last_')) {
+      throw new Error(`Unsupported relative time value: ${value}`);
+    }
+    const gte = 'now-' + value.slice(5);   // "last_7d" → "now-7d"
     return { range: { '@timestamp': { gte, lte: 'now' } } };
   }
   return { range: { '@timestamp': { gte: timeRange.start, lte: timeRange.end } } };

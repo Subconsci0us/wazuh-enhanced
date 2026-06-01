@@ -37,10 +37,8 @@ const VALID_SEVERITIES = new Set([
   'info', 'low', 'medium', 'high', 'critical', 'any',
 ]);
 
-const VALID_TIME_RELATIVE = new Set([
-  'last_1h', 'last_6h', 'last_12h', 'last_24h',
-  'last_7d', 'last_30d', 'last_90d',
-]);
+// Flexible relative time: last_<number><m|h|d> — e.g. last_1h, last_7d, last_14d
+const VALID_TIME_RELATIVE = /^last_[0-9]+[mhd]$/;
 
 const VALID_ENTITY_KEYS = new Set([
   'user', 'user_role', 'src_ip', 'host', 'process', 'process_path', 'command_line',
@@ -117,8 +115,8 @@ function validate(ir) {
     } else if (tr.type === 'relative') {
       if (!('value' in tr)) {
         errors.push({ field: 'time_range.value', message: 'time_range.value is required for relative type' });
-      } else if (!VALID_TIME_RELATIVE.has(tr.value)) {
-        errors.push({ field: 'time_range.value', message: `"${tr.value}" is not a valid relative time value` });
+      } else if (!VALID_TIME_RELATIVE.test(tr.value)) {
+        errors.push({ field: 'time_range.value', message: `"${tr.value}" is not a valid relative time value (expected last_<number><m|h|d>)` });
       }
     } else if (tr.type === 'absolute') {
       if (!('start' in tr)) {
@@ -188,6 +186,21 @@ function validate(ir) {
         errors.push({ field: 'correlation.maxspan', message: 'correlation.maxspan is required' });
       } else if (!VALID_MAXSPAN.test(corr.maxspan)) {
         errors.push({ field: 'correlation.maxspan', message: `"${corr.maxspan}" is not a valid maxspan (e.g. "10m", "1h")` });
+      }
+    }
+  }
+
+  // ── analytics (optional) ─────────────────────────────────────────────────────
+  if ('analytics' in ir && ir.analytics !== null && ir.analytics !== undefined) {
+    const a = ir.analytics;
+    if (typeof a !== 'object' || Array.isArray(a)) {
+      errors.push({ field: 'analytics', message: 'analytics must be an object or null' });
+    } else {
+      if (!('source' in a) || typeof a.source !== 'string' || a.source.length === 0) {
+        errors.push({ field: 'analytics.source', message: 'analytics.source must be a non-empty string' });
+      }
+      if (!('operations' in a) || !Array.isArray(a.operations)) {
+        errors.push({ field: 'analytics.operations', message: 'analytics.operations must be an array' });
       }
     }
   }

@@ -7,11 +7,13 @@
 #   sudo bash install.sh --no-restart # build and install only; skip service restart
 #
 # Environment variables (optional — override defaults):
+#   GROQ_API_KEY      Groq API key (recommended — fastest, free tier)
+#   GROQ_MODEL        Groq model (default: llama-3.3-70b-versatile)
 #   GEMINI_API_KEY    Gemini API key
-#   NLQ_BACKEND       'gemini' or 'ollama' (default: gemini if key set)
+#   NLQ_BACKEND       'groq', 'gemini', or 'ollama' (default: groq if key set)
 #   GEMINI_MODEL      Gemini model name (default: gemini-2.5-flash)
 #   OLLAMA_HOST       Ollama base URL (default: http://localhost:11434)
-#   OLLAMA_MODEL      Ollama model (default: phi3.5)
+#   OLLAMA_MODEL      Ollama model (default: qwen2.5:7b — best accuracy/speed)
 #   INDEXER_PASSWORD  Wazuh Indexer admin password (for alert search)
 # ────────────────────────────────────────────────────────────────────────────
 
@@ -134,7 +136,7 @@ GEMINI_API_KEY=${GEMINI_API_KEY:-}
 NLQ_BACKEND=${NLQ_BACKEND:-groq}
 GEMINI_MODEL=${GEMINI_MODEL:-gemini-2.5-flash}
 OLLAMA_HOST=${OLLAMA_HOST:-http://localhost:11434}
-OLLAMA_MODEL=${OLLAMA_MODEL:-phi3.5}
+OLLAMA_MODEL=${OLLAMA_MODEL:-qwen2.5:7b}
 INDEXER_HOST=${INDEXER_HOST:-localhost}
 INDEXER_PORT=${INDEXER_PORT:-9200}
 INDEXER_USER=${INDEXER_USER:-admin}
