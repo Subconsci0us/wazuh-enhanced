@@ -128,6 +128,11 @@ def load_system_prompt() -> str:
         for old, new in replacements.items():
             txt = txt.replace(old, new)
 
+        # Escape any remaining literal braces so LangChain's ChatPromptTemplate
+        # does not misinterpret JSON examples in the prompt as template variables.
+        # This must happen AFTER the named-placeholder replacements above so that
+        # {ALERTS_INDEX} etc. are substituted first (their values contain no braces).
+        txt = txt.replace("{", "{{").replace("}", "}}")
 
         # Append reminder section
         txt += (
