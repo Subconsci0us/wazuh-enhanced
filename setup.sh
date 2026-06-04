@@ -462,6 +462,78 @@ $(_sudo grep -oP '(?<=id=")[0-9]+' "$_f" 2>/dev/null)"
         warn "systemctl not available — skipping wazuh-manager restart."
         warn "PECA rules will take effect when the manager process is next restarted."
     fi
+
+    # ── Dashboard bundle patches (only when the dashboard is installed here) ──
+    # On split deployments (manager on one host, dashboard on another) these
+    # files won't exist and we silently skip — the patches must be run on the
+    # dashboard host by re-running: sudo bash setup.sh --only pecaRules
+    WAZUH_PLUGIN_DIR="/usr/share/wazuh-dashboard/plugins/wazuh"
+    PLUGIN_JS="$WAZUH_PLUGIN_DIR/target/public/wazuh.plugin.js"
+    CHUNK2="$WAZUH_PLUGIN_DIR/target/public/wazuh.chunk.2.js"
+
+    if _sudo test -f "$PLUGIN_JS" && _sudo test -f "$CHUNK2"; then
+        info "Wazuh Dashboard detected — applying PECA bundle patches …"
+
+        info "Backing up original bundle files (if not already done) …"
+        [ -f "${PLUGIN_JS}.orig" ] || _sudo cp "$PLUGIN_JS" "${PLUGIN_JS}.orig"
+        [ -f "${CHUNK2}.orig"    ] || _sudo cp "$CHUNK2"    "${CHUNK2}.orig"
+
+        # Patch 1: inject `const peca` Application object into wazuh.plugin.js
+        info "Patching wazuh.plugin.js (const peca Application object) …"
+        _sudo python3 "$RULES_SRC/patch_wazuh_plugin.py" \
+            || { error "wazuh.plugin.js patch failed — restoring original …"
+                 _sudo cp "${PLUGIN_JS}.orig" "$PLUGIN_JS"
+                 return 1; }
+
+        # Patch 2: add PECA Dashboard tab to wazuh.chunk.2.js
+        info "Patching wazuh.chunk.2.js (PECA Dashboard tab) …"
+        _sudo python3 "$RULES_SRC/patch_peca_dashboard.py" \
+            || { error "wazuh.chunk.2.js patch failed — restoring original …"
+                 _sudo cp "${CHUNK2}.orig" "$CHUNK2"
+                 return 1; }
+
+        # Regenerate compressed variants so the dashboard serves the patched JS.
+        # The browser prefers .br > .gz > .js — stale compressed files would
+        # shadow the patched plain .js and the fix would appear to not work.
+        info "Regenerating compressed bundle variants …"
+
+        if ! command -v brotli >/dev/null 2>&1; then
+            if command -v dnf >/dev/null 2>&1; then
+                _sudo dnf install -y brotli 2>/dev/null | grep -E "^(Installed|Updated)" || true
+            elif command -v apt-get >/dev/null 2>&1; then
+                _sudo apt-get install -y brotli 2>/dev/null | grep -E "^(Get|Inst|Sett)" || true
+            elif command -v yum >/dev/null 2>&1; then
+                _sudo yum install -y brotli 2>/dev/null | grep -E "^(Installed|Updated)" || true
+            fi
+        fi
+
+        for _js in "$PLUGIN_JS" "$CHUNK2"; do
+            _sudo rm -f "${_js}.gz" "${_js}.br"
+            if command -v gzip >/dev/null 2>&1; then
+                _sudo gzip -9 -k "$_js" \
+                    && _sudo chown wazuh-dashboard:wazuh-dashboard "${_js}.gz" \
+                    || warn "gzip failed for $(basename $_js) — .gz skipped"
+            fi
+            if command -v brotli >/dev/null 2>&1; then
+                _sudo brotli --best -k "$_js" -o "${_js}.br" \
+                    && _sudo chown wazuh-dashboard:wazuh-dashboard "${_js}.br" \
+                    || warn "brotli failed for $(basename $_js) — .br skipped"
+            fi
+            _sudo chown wazuh-dashboard:wazuh-dashboard "$_js"
+        done
+
+        success "PECA bundle patches applied."
+        warn "Hard-refresh your browser (Ctrl+Shift+R) after the dashboard restarts."
+
+        if [ "${NO_RESTART:-0}" -ne 1 ] && command -v systemctl >/dev/null 2>&1; then
+            info "Restarting wazuh-dashboard …"
+            _sudo systemctl restart wazuh-dashboard \
+                || warn "Dashboard restart failed — restart manually: sudo systemctl restart wazuh-dashboard"
+        fi
+    else
+        info "Wazuh Dashboard not found on this host — skipping bundle patches."
+        info "Run 'sudo bash setup.sh --only pecaRules' on the dashboard host to apply them."
+    fi
 }
 
 # =============================================================================
