@@ -561,7 +561,7 @@ CO_APP = (
     'showInAgentMenu:false,'
     'redirectTo:()=>`/overview/?tab=compliance-overview&tabView=dashboard`};'
 )
-CO_APP_MARKER = 'compliance_overview_app'
+CO_APP_MARKER = 'const compliance_overview_app='
 
 # Anchor for inserting both app defs on a fresh install (end of TSC redirectTo,
 # immediately before const docker= — verified unique in Wazuh 4.14.3 plugin.js).
